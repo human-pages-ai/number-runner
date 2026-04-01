@@ -148,9 +148,9 @@
 
     // ─── Difficulty ─────────────────────────────────────────────────
     const DIFF = {
-        easy:   { enemySpeed: 1.5, enemyHP: 0.6, spawnRate: 0.7, barrelRate: 1.3, coins: 1.5 },
-        normal: { enemySpeed: 2.2, enemyHP: 1.0, spawnRate: 1.0, barrelRate: 1.0, coins: 1.0 },
-        hard:   { enemySpeed: 3.0, enemyHP: 1.4, spawnRate: 1.4, barrelRate: 0.7, coins: 0.7 },
+        easy:   { enemySpeed: 1.2, enemyHP: 0.4, spawnRate: 0.5, barrelRate: 1.5, coins: 1.5 },
+        normal: { enemySpeed: 1.6, enemyHP: 0.6, spawnRate: 0.6, barrelRate: 1.2, coins: 1.0 },
+        hard:   { enemySpeed: 2.2, enemyHP: 1.0, spawnRate: 1.0, barrelRate: 0.8, coins: 0.7 },
     };
     let diff = DIFF.normal;
     document.querySelectorAll('.diff-btn').forEach(btn => {
@@ -163,7 +163,7 @@
 
     // ─── Weapons ────────────────────────────────────────────────────
     const WEAPONS = [
-        { name: 'Pistol',      damage: 1, fireRate: 4.0, color: 0xffee44, size: 0.12 },
+        { name: 'Pistol',      damage: 2, fireRate: 4.0, color: 0xffee44, size: 0.12 },
         { name: 'SMG',         damage: 1, fireRate: 7.0, color: 0xffaa22, size: 0.12 },
         { name: 'Shotgun',     damage: 3, fireRate: 3.0, color: 0xff8822, size: 0.15 },
         { name: 'Machine Gun', damage: 2, fireRate: 10,  color: 0xff5500, size: 0.14 },
@@ -187,8 +187,8 @@
 
     const ROAD_W = 10;
     const DEFENSE_Z = 2;
-    const SPAWN_Z_MIN = -35;
-    const SPAWN_Z_MAX = -18;
+    const SPAWN_Z_MIN = -40;
+    const SPAWN_Z_MAX = -22;
 
     // ─── Road / Environment ─────────────────────────────────────────
     let envMeshes = [];
@@ -505,7 +505,8 @@
     }
 
     function spawnEnemy(z, hp) {
-        const cx = (Math.random() - 0.5) * (ROAD_W - 2);
+        const spawnW = Math.min(ROAD_W - 2, 3 + wave * 1.0);
+        const cx = (Math.random() - 0.5) * spawnW;
         const group = new THREE.Group();
         group.position.set(cx, 0, z);
 
@@ -575,7 +576,7 @@
             new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.35 }));
         g.add(glow);
 
-        g.userData = { damage: bulletDamage, life: 2.5 };
+        g.userData = { damage: bulletDamage, life: 2.5, vx: (Math.random() - 0.5) * 2.0 };
         scene.add(g); bullets.push(g);
     }
 
@@ -682,9 +683,9 @@
     // ─── Wave System ────────────────────────────────────────────────
     function startWave() {
         wave++;
-        const baseCount = 8 + wave * 5 + wave * wave * 1.0;
+        const baseCount = 3 + wave * 3 + wave * wave * 0.5;
         const enemyCount = Math.floor(baseCount * diff.spawnRate * pressure);
-        const barrelCount = Math.floor((2 + Math.min(wave * 0.6, 5)) * diff.barrelRate);
+        const barrelCount = Math.floor((3 + Math.min(wave * 0.8, 6)) * diff.barrelRate);
         waveEnemiesLeft = enemyCount;
         waveEnemiesTotal = enemyCount;
         waveBarrelsLeft = barrelCount;
@@ -723,8 +724,8 @@
             id: 'squad', name: 'Extra Shooter',
             maxLevel: 8,
             cost: lvl => 8 + lvl * 8,
-            apply: lvl => { squadCount = 1 + lvl; },
-            desc: lvl => `${1+lvl} → ${2+lvl} shooters`,
+            apply: lvl => { squadCount = 2 + lvl; },
+            desc: lvl => `${2+lvl} → ${3+lvl} shooters`,
         },
     ];
 
@@ -843,11 +844,11 @@
         spawnAmbientFire(dt);
 
         // Spawn enemies
-        const spawnInt = Math.max(0.25, 2.0 - wave * 0.15) / diff.spawnRate;
+        const spawnInt = Math.max(0.4, 2.5 - wave * 0.12) / diff.spawnRate;
         spawnTimer += dt;
         if (waveEnemiesLeft > 0 && spawnTimer >= spawnInt) {
             spawnTimer = 0;
-            const hp = Math.ceil((1 + wave * 0.8 + Math.random() * wave * 0.5) * diff.enemyHP * (0.7 + pressure * 0.3));
+            const hp = Math.ceil((1 + wave * 0.4 + Math.random() * wave * 0.3) * diff.enemyHP * (0.7 + pressure * 0.3));
             spawnEnemy(SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN), hp);
             waveEnemiesLeft--;
         }
@@ -920,6 +921,7 @@
         for (let i = bullets.length - 1; i >= 0; i--) {
             const b = bullets[i];
             b.position.z -= bulletSpeed * dt;
+            b.position.x += (b.userData.vx || 0) * dt;
             b.userData.life -= dt;
             if (b.userData.life <= 0 || b.position.z < SPAWN_Z_MIN - 10) {
                 scene.remove(b); bullets.splice(i, 1); continue;
@@ -931,7 +933,7 @@
                 const e = enemies[j];
                 const dx = Math.abs(b.position.x - e.position.x);
                 const dz = Math.abs(b.position.z - e.position.z);
-                const hr = 0.8 + e.userData.zombies.length * 0.05;
+                const hr = 1.0 + e.userData.zombies.length * 0.05;
                 if (dx < hr && dz < hr) {
                     const kills = Math.min(b.userData.damage, e.userData.hp);
                     e.userData.hp -= kills;
@@ -1043,7 +1045,7 @@
     function startGame() {
         clearEntities();
         wave = 0; score = 0; coins = 0;
-        squadCount = 1; weaponLevel = 0;
+        squadCount = 2; weaponLevel = 0;
         bulletSpeed = 22; pressure = 1.0;
         upgrades = { weapon: 0, squad: 0 };
         applyWeapon();
