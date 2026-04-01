@@ -142,13 +142,16 @@
         bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 }),
         bulletTrail: new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.4 }),
         pillar: new THREE.MeshStandardMaterial({ color: 0xBBBBBB }),
+        gunMetal: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.6, roughness: 0.3 }),
     };
 
     // ─── Geometries (reusable) ──────────────────────────────────────
     const GEO = {
-        body: new THREE.CylinderGeometry(0.25, 0.3, 0.8, 6),
-        head: new THREE.SphereGeometry(0.22, 8, 8),
-        gun: new THREE.BoxGeometry(0.1, 0.1, 0.4),
+        torso: new THREE.CylinderGeometry(0.18, 0.22, 0.45, 6),
+        head: new THREE.SphereGeometry(0.2, 8, 8),
+        limb: new THREE.CylinderGeometry(0.06, 0.06, 0.35, 4),
+        gun: new THREE.BoxGeometry(0.08, 0.08, 0.35),
+        gunBarrel: new THREE.CylinderGeometry(0.025, 0.025, 0.2, 4),
         bullet: new THREE.SphereGeometry(0.15, 6, 6),
         bulletTrail: new THREE.CylinderGeometry(0.05, 0.08, 0.6, 4),
         wallBlock: new THREE.BoxGeometry(1, 1, 1),
@@ -255,9 +258,9 @@
                 const wall = createWall(z, hp);
                 walls.push(wall);
 
-                // Enemy group in front of wall
-                const enemyCount = Math.min(Math.ceil(hp / 4), 15);
-                const eg = createEnemyGroup(z + 3, enemyCount, lvl);
+                // Enemy group in front of wall — bigger hordes
+                const enemyCount = Math.min(Math.ceil(hp / 3), 25);
+                const eg = createEnemyGroup(z + 4, enemyCount, lvl);
                 enemies.push(eg);
             }
             z -= 18;
@@ -277,25 +280,63 @@
     // ─── Create Entities ────────────────────────────────────────────
     function createRunner(x, z, isEnemy) {
         const g = new THREE.Group();
-
-        // Simple capsule body (pill shape) — genre standard
         const bodyMat = isEnemy ? MAT.enemy : MAT.ally;
-        const body = new THREE.Mesh(GEO.body, bodyMat);
-        body.position.y = 0.5;
-        body.castShadow = true;
-        g.add(body);
+        const skinMat = isEnemy ? MAT.enemySkin : MAT.allySkin;
 
-        // Head (same color as body for blob look at distance)
-        const head = new THREE.Mesh(GEO.head, isEnemy ? MAT.enemySkin : MAT.allySkin);
-        head.position.y = 1.0;
+        // Torso
+        const torso = new THREE.Mesh(GEO.torso, bodyMat);
+        torso.position.y = 0.6;
+        torso.castShadow = true;
+        g.add(torso);
+
+        // Head
+        const head = new THREE.Mesh(GEO.head, skinMat);
+        head.position.y = 1.05;
         head.castShadow = true;
         g.add(head);
+
+        // Left leg
+        const legL = new THREE.Mesh(GEO.limb, bodyMat);
+        legL.position.set(-0.08, 0.2, 0);
+        g.add(legL);
+
+        // Right leg
+        const legR = new THREE.Mesh(GEO.limb, bodyMat);
+        legR.position.set(0.08, 0.2, 0);
+        g.add(legR);
+
+        // Left arm
+        const armL = new THREE.Mesh(GEO.limb, skinMat);
+        armL.position.set(-0.28, 0.7, 0);
+        armL.rotation.z = 0.3;
+        g.add(armL);
+
+        // Right arm (holds gun for allies)
+        const armR = new THREE.Mesh(GEO.limb, skinMat);
+        armR.position.set(0.28, 0.7, 0);
+        armR.rotation.z = -0.3;
+        g.add(armR);
+
+        // Gun (allies only)
+        if (!isEnemy) {
+            const gunGroup = new THREE.Group();
+            const gunBody = new THREE.Mesh(GEO.gun, MAT.gunMetal);
+            gunBody.position.set(0, 0, -0.15);
+            gunGroup.add(gunBody);
+            const barrel = new THREE.Mesh(GEO.gunBarrel, MAT.gunMetal);
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.set(0, 0.02, -0.4);
+            gunGroup.add(barrel);
+            gunGroup.position.set(0.35, 0.6, 0);
+            g.add(gunGroup);
+        }
 
         g.position.set(x, 0, z);
         g.userData = {
             baseX: x, baseZ: z,
             phase: Math.random() * Math.PI * 2,
-            isEnemy, dead: false
+            isEnemy, dead: false,
+            legL, legR, armL, armR
         };
 
         scene.add(g);
@@ -436,15 +477,16 @@
 
     function createEnemyGroup(z, count, lvl) {
         const units = [];
+        const spread = Math.min(4, Math.sqrt(count) * 0.8);
         for (let i = 0; i < count; i++) {
             const a = Math.random() * Math.PI * 2;
-            const r = Math.sqrt(Math.random()) * Math.min(3, Math.sqrt(count) * 0.6);
+            const r = Math.sqrt(Math.random()) * spread;
             const unit = createRunner(Math.cos(a) * r, z + Math.sin(a) * r - 2, true);
             units.push(unit);
         }
 
-        const sprite = createTextSprite(count.toString(), '#ff6666', 0.8);
-        sprite.position.set(0, 2.5, z - 1);
+        const sprite = createTextSprite(count.toString(), '#ff6666', 1.2);
+        sprite.position.set(0, 2.8, z - 1);
         scene.add(sprite);
 
         return { units, z, alive: count, countSprite: sprite, wallIndex: walls.length - 1 };
@@ -1123,11 +1165,20 @@
 
         // Animate runners
         const time = Date.now() * 0.01;
+        const runSpeed = speed * 8;
         runners.forEach(r => {
             const spread = 1 + runners.length * 0.008;
             r.position.x = crowdX + r.userData.baseX * spread;
             r.position.z = r.userData.baseZ * spread * 0.5;
-            r.position.y = Math.abs(Math.sin(time + r.userData.phase)) * 0.12;
+            r.position.y = Math.abs(Math.sin(time * 2 + r.userData.phase)) * 0.08;
+            // Leg & arm swing animation
+            const swing = Math.sin(time * runSpeed + r.userData.phase);
+            if (r.userData.legL) {
+                r.userData.legL.rotation.x = swing * 0.6;
+                r.userData.legR.rotation.x = -swing * 0.6;
+                r.userData.armL.rotation.x = -swing * 0.4;
+                r.userData.armR.rotation.x = swing * 0.4;
+            }
         });
 
         // Update floating crowd number
@@ -1155,7 +1206,14 @@
         enemies.forEach(eg => {
             eg.units.forEach(u => {
                 if (u.userData.dead) return;
-                u.position.y = Math.abs(Math.sin(time + u.userData.phase)) * 0.08;
+                u.position.y = Math.abs(Math.sin(time * 2 + u.userData.phase)) * 0.06;
+                const swing = Math.sin(time * 4 + u.userData.phase);
+                if (u.userData.legL) {
+                    u.userData.legL.rotation.x = swing * 0.5;
+                    u.userData.legR.rotation.x = -swing * 0.5;
+                    u.userData.armL.rotation.x = -swing * 0.3;
+                    u.userData.armR.rotation.x = swing * 0.3;
+                }
             });
         });
 
