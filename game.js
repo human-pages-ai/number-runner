@@ -1,5 +1,5 @@
-// Number Runner — LastTokens
-// 3D gates-runner with shooting. Built with leftover AI tokens.
+// Barrel Defense — LastTokens
+// Shoot barrels for upgrades. Shoot enemies to survive. The game that doesn't exist... until now.
 
 (function () {
     'use strict';
@@ -11,12 +11,13 @@
 
     function initRenderer() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87ceeb);
-        scene.fog = new THREE.Fog(0x87ceeb, 40, 120);
+        scene.background = new THREE.Color(0x1a1a2e);
+        scene.fog = new THREE.FogExp2(0x1a1a2e, 0.012);
 
-        camera = new THREE.PerspectiveCamera(60, W() / H(), 0.1, 500);
-        camera.position.set(0, 10, 16);
-        camera.lookAt(0, 0, -8);
+        // Angled top-down camera — enemies approach from far end
+        camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 200);
+        camera.position.set(0, 18, 14);
+        camera.lookAt(0, 0, -5);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(W(), H());
@@ -26,19 +27,23 @@
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
         // Lights
-        const ambient = new THREE.AmbientLight(0xffffff, 0.65);
-        scene.add(ambient);
+        scene.add(new THREE.AmbientLight(0x6688cc, 0.5));
 
-        const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-        sun.position.set(8, 20, 10);
+        const sun = new THREE.DirectionalLight(0xffeedd, 0.9);
+        sun.position.set(5, 25, 10);
         sun.castShadow = true;
-        sun.shadow.camera.left = -20;
-        sun.shadow.camera.right = 20;
-        sun.shadow.camera.top = 20;
-        sun.shadow.camera.bottom = -20;
+        sun.shadow.camera.left = -25;
+        sun.shadow.camera.right = 25;
+        sun.shadow.camera.top = 30;
+        sun.shadow.camera.bottom = -15;
         sun.shadow.mapSize.width = 1024;
         sun.shadow.mapSize.height = 1024;
         scene.add(sun);
+
+        // Orange point light at player position for warmth
+        const playerLight = new THREE.PointLight(0xff8844, 0.6, 20);
+        playerLight.position.set(0, 3, 5);
+        scene.add(playerLight);
 
         window.addEventListener('resize', () => {
             camera.aspect = W() / H();
@@ -50,15 +55,20 @@
     // ─── DOM ────────────────────────────────────────────────────────
     const startScreen = document.getElementById('start-screen');
     const gameoverScreen = document.getElementById('gameover-screen');
+    const waveScreen = document.getElementById('wave-screen');
     const goTitle = document.getElementById('go-title');
-    const goLevel = document.getElementById('go-level');
+    const goWave = document.getElementById('go-wave');
     const goScore = document.getElementById('go-score');
-    const countDisplay = document.getElementById('count-display');
-    const levelDisplay = document.getElementById('level-display');
+    const wsWave = document.getElementById('ws-wave');
+    const wsCoins = document.getElementById('ws-coins');
+    const waveDisplay = document.getElementById('wave-display');
+    const squadDisplay = document.getElementById('squad-display');
+    const coinDisplay = document.getElementById('coin-display');
     const hudEl = document.getElementById('hud');
-    const progressEl = document.getElementById('progress');
-    const progressFill = document.getElementById('progress-fill');
+    const waveBar = document.getElementById('wave-bar');
+    const waveBarFill = document.getElementById('wave-bar-fill');
     const actionText = document.getElementById('action-text');
+    const upgradeButtons = document.getElementById('upgrade-buttons');
 
     // ─── Audio (Web Audio API) ──────────────────────────────────────
     let audioCtx;
@@ -98,1058 +108,619 @@
     }
 
     const SFX = {
-        shoot: () => playNoise(0.02, 0.04),
-        hit: () => playTone(80, 0.05, 'sine', 0.1),
-        wallBreak: () => { playNoise(0.15, 0.12); playTone(60, 0.15, 'sine', 0.15); },
-        gateGood: () => { playTone(800, 0.12, 'sine', 0.12, 1200); },
-        gateGreat: () => {
-            playTone(523, 0.1, 'sine', 0.1);
-            setTimeout(() => playTone(659, 0.1, 'sine', 0.1), 60);
-            setTimeout(() => playTone(784, 0.15, 'sine', 0.12), 120);
+        shoot: () => playNoise(0.03, 0.05),
+        hit: () => playTone(200, 0.06, 'square', 0.08, 100),
+        enemyDie: () => { playTone(120, 0.1, 'sine', 0.1); playNoise(0.05, 0.06); },
+        barrelBreak: () => { playNoise(0.2, 0.15); playTone(400, 0.1, 'sine', 0.12, 800); },
+        upgrade: () => {
+            playTone(523, 0.08, 'sine', 0.1);
+            setTimeout(() => playTone(784, 0.12, 'sine', 0.12), 80);
         },
-        gateBad: () => playTone(400, 0.1, 'square', 0.06, 200),
-        bossHit: () => playTone(60, 0.1, 'sine', 0.15),
-        levelComplete: () => {
+        waveClear: () => {
             [523, 659, 784, 1047].forEach((f, i) => {
-                setTimeout(() => playTone(f, 0.15, 'sine', 0.12), i * 100);
+                setTimeout(() => playTone(f, 0.15, 'sine', 0.1), i * 80);
             });
         },
         gameOver: () => {
-            [330, 262, 220].forEach((f, i) => {
-                setTimeout(() => playTone(f, 0.25, 'sine', 0.1), i * 200);
+            [330, 262, 220, 165].forEach((f, i) => {
+                setTimeout(() => playTone(f, 0.3, 'sine', 0.1), i * 180);
             });
         },
+        coin: () => playTone(1200, 0.05, 'sine', 0.06, 1800),
     };
 
-    // ─── Materials (reusable) ───────────────────────────────────────
-    // 5-color palette: blue (player), red (enemy), green (good), soft grey (track), green (grass)
+    // ─── Materials ──────────────────────────────────────────────────
     const MAT = {
-        ally: new THREE.MeshStandardMaterial({ color: 0x4A90D9 }),
-        allySkin: new THREE.MeshStandardMaterial({ color: 0xffdcb0 }),
-        enemy: new THREE.MeshStandardMaterial({ color: 0xE84040 }),
-        enemySkin: new THREE.MeshStandardMaterial({ color: 0xffbbaa }),
-        gateGood: new THREE.MeshStandardMaterial({ color: 0x2ECC71, transparent: true, opacity: 0.8, emissive: 0x115533, emissiveIntensity: 0.3 }),
-        gateGreat: new THREE.MeshStandardMaterial({ color: 0x3498DB, transparent: true, opacity: 0.8, emissive: 0x112255, emissiveIntensity: 0.3 }),
-        gateBad: new THREE.MeshStandardMaterial({ color: 0xE74C3C, transparent: true, opacity: 0.8, emissive: 0x551111, emissiveIntensity: 0.3 }),
-        wall: new THREE.MeshStandardMaterial({ color: 0xE74C3C }),
-        wallDark: new THREE.MeshStandardMaterial({ color: 0xC0392B }),
-        boss: new THREE.MeshStandardMaterial({ color: 0xA93226, emissive: 0x330000, emissiveIntensity: 0.4 }),
-        ground: new THREE.MeshStandardMaterial({ color: 0x90C695 }),
-        track: new THREE.MeshStandardMaterial({ color: 0xE0D8CC }),
-        trackLine: new THREE.MeshStandardMaterial({ color: 0xF0EBE0 }),
-        trackEdge: new THREE.MeshStandardMaterial({ color: 0xCCC5B8 }),
+        ground: new THREE.MeshStandardMaterial({ color: 0x2a2a3e }),
+        arena: new THREE.MeshStandardMaterial({ color: 0x333350 }),
+        arenaLine: new THREE.MeshStandardMaterial({ color: 0x444466 }),
+        barrel: new THREE.MeshStandardMaterial({ color: 0x8B5E3C, metalness: 0.2, roughness: 0.7 }),
+        barrelRing: new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.5 }),
+        barrelGold: new THREE.MeshStandardMaterial({ color: 0xDAA520, metalness: 0.6, roughness: 0.3 }),
+        enemy: new THREE.MeshStandardMaterial({ color: 0xCC3333 }),
+        enemySkin: new THREE.MeshStandardMaterial({ color: 0xDDBB88 }),
+        ally: new THREE.MeshStandardMaterial({ color: 0x3377DD }),
+        allySkin: new THREE.MeshStandardMaterial({ color: 0xFFDCB0 }),
+        gun: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.7, roughness: 0.3 }),
         bullet: new THREE.MeshBasicMaterial({ color: 0xffee44 }),
-        bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 }),
-        bulletTrail: new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.4 }),
-        pillar: new THREE.MeshStandardMaterial({ color: 0xBBBBBB }),
-        gunMetal: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.6, roughness: 0.3 }),
+        bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5 }),
+        particle: new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true }),
+        coin: new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.8, roughness: 0.2 }),
     };
 
-    // ─── Geometries (reusable) ──────────────────────────────────────
-    const GEO = {
-        torso: new THREE.CylinderGeometry(0.18, 0.22, 0.45, 6),
-        head: new THREE.SphereGeometry(0.2, 8, 8),
-        limb: new THREE.CylinderGeometry(0.06, 0.06, 0.35, 4),
-        gun: new THREE.BoxGeometry(0.08, 0.08, 0.35),
-        gunBarrel: new THREE.CylinderGeometry(0.025, 0.025, 0.2, 4),
-        bullet: new THREE.SphereGeometry(0.15, 6, 6),
-        bulletTrail: new THREE.CylinderGeometry(0.05, 0.08, 0.6, 4),
-        wallBlock: new THREE.BoxGeometry(1, 1, 1),
-        gateFrame: new THREE.BoxGeometry(5, 3.5, 0.25),
-        pillar: new THREE.CylinderGeometry(0.15, 0.15, 4, 6),
-    };
-
-    // ─── Difficulty ────────────────────────────────────────────────
+    // ─── Difficulty ─────────────────────────────────────────────────
     const DIFF = {
-        easy:   { speed: 0.28, startCrowd: 5, wallHP: 0.5, bossHP: 0.5, segments: 0.7, label: 'EASY' },
-        normal: { speed: 0.38, startCrowd: 2, wallHP: 1.0, bossHP: 1.0, segments: 1.0, label: 'NORMAL' },
-        hard:   { speed: 0.45, startCrowd: 2, wallHP: 1.4, bossHP: 1.3, segments: 1.3, label: 'HARD' },
+        easy:   { enemySpeed: 1.5, enemyHP: 0.6, spawnRate: 0.7, barrelRate: 1.3, coins: 1.5, label: 'EASY' },
+        normal: { enemySpeed: 2.2, enemyHP: 1.0, spawnRate: 1.0, barrelRate: 1.0, coins: 1.0, label: 'NORMAL' },
+        hard:   { enemySpeed: 3.0, enemyHP: 1.4, spawnRate: 1.4, barrelRate: 0.7, coins: 0.7, label: 'HARD' },
     };
-    let difficulty = DIFF.normal;
+    let diff = DIFF.normal;
 
-    // Difficulty selector UI
     document.querySelectorAll('.diff-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('selected'));
             btn.classList.add('selected');
-            difficulty = DIFF[btn.dataset.diff];
+            diff = DIFF[btn.dataset.diff];
         });
     });
 
     // ─── Game State ─────────────────────────────────────────────────
-    let state = 'menu'; // menu | running | battle | smashing | complete | gameover
-    let level = 1;
+    let state = 'menu'; // menu | playing | waveclear | gameover
+    let wave = 0;
     let score = 0;
-    let crowdCount = 0;
-    let crowdX = 0;
-    let targetX = 0;
-    let distance = 0;
-    let levelDist = 0;
-    let speed = 0;
-    let timescale = 1;
-    let timescaleTarget = 1;
+    let coins = 0;
 
-    let runners = [];      // player army 3D objects
-    let gates = [];         // gate pair groups
-    let walls = [];         // wall obstacles
-    let enemies = [];       // enemy groups
-    let bullets3d = [];     // bullet meshes
-    let particles3d = [];   // particle meshes
-    let groundTiles = [];
+    // Player squad
+    let squad = [];       // array of shooter objects in scene
+    let squadCount = 1;
+    let fireRate = 2.5;   // shots per second per shooter
+    let bulletDamage = 1;
+    let bulletSpeed = 30;
 
-    let bossObj = null;
-    let bossHP = 0;
-    let bossMaxHP = 0;
-    let battleTimer = 0;
+    // Upgrades
+    let upgrades = {
+        damage: 0,    // +1 damage per level
+        fireRate: 0,  // +0.5 fire rate per level
+        squad: 0,     // +1 squad member per level
+        range: 0,     // not used yet, placeholder
+    };
+
+    // Entities
+    let enemies = [];
+    let barrels = [];
+    let bullets = [];
+    let particles = [];
+    let coinPickups = [];
+    let aimX = 0;       // aim position X (world coords)
     let fireCooldown = 0;
-
-    // Floating crowd count sprite
-    let crowdSprite = null;
-
-    // Camera shake
     let shakeAmount = 0;
 
-    // Number animation
-    let countAnim = { scale: 1, targetScale: 1, color: null };
+    // Wave config
+    let waveEnemiesLeft = 0;
+    let waveEnemiesTotal = 0;
+    let waveBarrelsLeft = 0;
+    let spawnTimer = 0;
+    let barrelTimer = 0;
 
-    // ─── Level Generation ───────────────────────────────────────────
-    function clearLevel() {
-        // Remove all dynamic objects
-        [...runners, ...bullets3d, ...particles3d].forEach(o => scene.remove(o));
-        gates.forEach(g => scene.remove(g.group));
-        walls.forEach(w => scene.remove(w.group));
-        enemies.forEach(eg => { eg.units.forEach(u => scene.remove(u)); scene.remove(eg.countSprite); });
-        if (bossObj) scene.remove(bossObj);
-        if (crowdSprite) scene.remove(crowdSprite);
-        runners = []; gates = []; walls = []; enemies = [];
-        bullets3d = []; particles3d = [];
-        bossObj = null;
-        crowdSprite = null;
-    }
+    // Defense line — enemies reaching this Z = damage
+    const DEFENSE_Z = 4;
+    const SPAWN_Z_MIN = -35;
+    const SPAWN_Z_MAX = -20;
+    const ARENA_WIDTH = 12;
 
-    function generateLevel(lvl) {
-        clearLevel();
+    // ─── Ground / Arena ─────────────────────────────────────────────
+    let groundMeshes = [];
 
-        speed = difficulty.speed + lvl * 0.025;
-        crowdCount = difficulty.startCrowd + Math.floor(lvl / 3);
-        crowdX = 0;
-        targetX = 0;
-        distance = 0;
-        fireCooldown = 0;
-        timescale = 1;
-        timescaleTarget = 1;
+    function initArena() {
+        groundMeshes.forEach(m => scene.remove(m));
+        groundMeshes = [];
 
-        // Large floating crowd count above player
-        crowdSprite = createTextSprite(crowdCount.toString(), '#ffffff', 3, true);
-        crowdSprite.position.set(0, 4, 0);
-        scene.add(crowdSprite);
+        // Large ground plane
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(80, 120),
+            MAT.ground
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.set(0, -0.1, -20);
+        ground.receiveShadow = true;
+        scene.add(ground);
+        groundMeshes.push(ground);
 
-        const segments = Math.floor((7 + Math.floor(lvl * 1.5)) * difficulty.segments);
-        let z = -20;
+        // Arena floor (lighter)
+        const arena = new THREE.Mesh(
+            new THREE.PlaneGeometry(ARENA_WIDTH, 50),
+            MAT.arena
+        );
+        arena.rotation.x = -Math.PI / 2;
+        arena.position.set(0, -0.05, -10);
+        arena.receiveShadow = true;
+        scene.add(arena);
+        groundMeshes.push(arena);
 
-        for (let i = 0; i < segments; i++) {
-            if (i % 2 === 0) {
-                // Gate pair
-                const pair = createGatePair(z, lvl);
-                gates.push(pair);
-            } else {
-                // Wall with enemies
-                const hp = Math.floor((10 + lvl * 6) * (0.7 + Math.random() * 0.6) * difficulty.wallHP);
-                const wall = createWall(z, hp);
-                walls.push(wall);
+        // Defense line marker
+        const line = new THREE.Mesh(
+            new THREE.PlaneGeometry(ARENA_WIDTH + 2, 0.15),
+            new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.6 })
+        );
+        line.rotation.x = -Math.PI / 2;
+        line.position.set(0, 0.01, DEFENSE_Z);
+        scene.add(line);
+        groundMeshes.push(line);
 
-                // Enemy group in front of wall — bigger hordes
-                const enemyCount = Math.min(Math.ceil(hp / 3), 25);
-                const eg = createEnemyGroup(z + 4, enemyCount, lvl);
-                enemies.push(eg);
-            }
-            z -= 18;
+        // Side walls (visual only)
+        for (const side of [-1, 1]) {
+            const wall = new THREE.Mesh(
+                new THREE.BoxGeometry(0.3, 1.5, 50),
+                MAT.arenaLine
+            );
+            wall.position.set(side * (ARENA_WIDTH / 2 + 0.15), 0.5, -10);
+            wall.castShadow = true;
+            scene.add(wall);
+            groundMeshes.push(wall);
         }
-
-        // Boss
-        bossMaxHP = Math.floor((40 + lvl * 25 + lvl * lvl * 2) * difficulty.bossHP);
-        bossHP = bossMaxHP;
-        bossObj = createBoss(z - 15);
-
-        levelDist = Math.abs(z - 15) + 30;
-
-        updateRunners();
-        updateHUD();
     }
 
-    // ─── Character Sprite Art ─────────────────────────────────────
-    // Draw characters on canvas, cache as textures for billboard sprites
-
-    const charCache = { warrior: [], viking: [] };
+    // ─── Character Sprites (canvas-drawn billboards) ────────────────
+    const charTexCache = {};
 
     function drawWarrior(ctx, variant) {
-        // Post-apocalyptic warrior with gun
-        const colors = ['#3B7DD8', '#4A90D9', '#2E6BC4', '#5A9DE8'];
-        const armorColors = ['#555', '#666', '#777'];
-        const c = colors[variant % colors.length];
-        const ac = armorColors[variant % armorColors.length];
-
         ctx.save();
-        ctx.translate(64, 10);
+        ctx.translate(64, 8);
+        const blues = ['#3B7DD8', '#4A90D9', '#2E6BC4', '#5599EE'];
+        const c = blues[variant % 4];
 
-        // Legs (spread stance)
+        // Legs
         ctx.fillStyle = '#444';
-        ctx.fillRect(18, 80, 10, 30);  // left leg
-        ctx.fillRect(36, 80, 10, 30);  // right leg
-        // Boots
+        ctx.fillRect(20, 78, 9, 28);
+        ctx.fillRect(35, 78, 9, 28);
         ctx.fillStyle = '#333';
-        ctx.fillRect(16, 105, 14, 8);
-        ctx.fillRect(34, 105, 14, 8);
+        ctx.fillRect(18, 100, 13, 8);
+        ctx.fillRect(33, 100, 13, 8);
 
-        // Body / armor vest
+        // Body
         ctx.fillStyle = c;
-        ctx.fillRect(15, 40, 34, 42);
-        // Armor plate
-        ctx.fillStyle = ac;
-        ctx.fillRect(20, 45, 24, 15);
+        ctx.fillRect(16, 38, 32, 42);
+        // Armor
+        ctx.fillStyle = '#555';
+        ctx.fillRect(20, 42, 24, 14);
         // Belt
         ctx.fillStyle = '#8B4513';
-        ctx.fillRect(15, 75, 34, 6);
+        ctx.fillRect(16, 73, 32, 5);
 
-        // Arms
-        ctx.fillStyle = '#DDBB88'; // skin
-        ctx.fillRect(5, 45, 12, 8);   // left upper arm
-        ctx.fillRect(47, 45, 12, 8);  // right upper arm
+        // Arms + skin
+        ctx.fillStyle = '#DDBB88';
+        ctx.fillRect(6, 42, 11, 8);
+        ctx.fillRect(47, 42, 11, 8);
 
-        // Gun (right side)
+        // Gun
         ctx.fillStyle = '#333';
-        ctx.fillRect(52, 38, 8, 4);   // gun body
-        ctx.fillRect(56, 30, 4, 12);  // barrel (pointing up-forward)
+        ctx.fillRect(50, 35, 7, 4);
+        ctx.fillRect(54, 28, 4, 11);
         ctx.fillStyle = '#C8A000';
-        ctx.fillRect(52, 42, 8, 3);   // trigger guard (gold)
+        ctx.fillRect(50, 39, 7, 2);
 
         // Head
         ctx.fillStyle = '#DDBB88';
         ctx.beginPath();
-        ctx.arc(32, 30, 14, 0, Math.PI * 2);
+        ctx.arc(32, 28, 13, 0, Math.PI * 2);
         ctx.fill();
 
-        // Headgear (bandana/goggles)
+        // Headgear
         ctx.fillStyle = '#C0392B';
-        ctx.fillRect(18, 20, 28, 6);
-        // Goggles
+        ctx.fillRect(19, 18, 26, 5);
         ctx.fillStyle = '#FFD700';
-        ctx.fillRect(22, 22, 8, 5);
-        ctx.fillRect(34, 22, 8, 5);
-        ctx.fillStyle = '#87CEEB';
-        ctx.fillRect(24, 23, 5, 3);
-        ctx.fillRect(36, 23, 5, 3);
-
-        // Ammo belt
-        if (variant % 2 === 0) {
-            ctx.fillStyle = '#8B4513';
-            ctx.fillRect(17, 55, 3, 25);
-            for (let i = 0; i < 5; i++) {
-                ctx.fillStyle = '#C8A000';
-                ctx.fillRect(16, 57 + i * 5, 5, 3);
-            }
-        }
+        ctx.fillRect(23, 20, 7, 4);
+        ctx.fillRect(34, 20, 7, 4);
+        ctx.fillStyle = '#88CCEE';
+        ctx.fillRect(25, 21, 4, 2);
+        ctx.fillRect(36, 21, 4, 2);
 
         ctx.restore();
     }
 
     function drawViking(ctx, variant) {
-        // Viking raider with axe/shield
-        const colors = ['#8B0000', '#A52A2A', '#B22222', '#CD5C5C'];
-        const c = colors[variant % colors.length];
-
         ctx.save();
-        ctx.translate(64, 10);
+        ctx.translate(64, 8);
+        const reds = ['#8B0000', '#A52A2A', '#B22222', '#CC4444'];
+        const c = reds[variant % 4];
 
         // Legs
         ctx.fillStyle = '#654321';
-        ctx.fillRect(18, 82, 10, 28);
-        ctx.fillRect(36, 82, 10, 28);
-        // Fur boots
+        ctx.fillRect(20, 80, 9, 26);
+        ctx.fillRect(35, 80, 9, 26);
         ctx.fillStyle = '#8B7355';
-        ctx.fillRect(15, 103, 16, 10);
-        ctx.fillRect(33, 103, 16, 10);
-        ctx.fillStyle = '#A0926B';
-        ctx.fillRect(15, 103, 16, 4); // fur trim
+        ctx.fillRect(17, 100, 14, 8);
+        ctx.fillRect(33, 100, 14, 8);
 
-        // Body (tunic)
+        // Body
         ctx.fillStyle = c;
-        ctx.fillRect(14, 40, 36, 44);
-        // Chest pattern
+        ctx.fillRect(15, 38, 34, 44);
         ctx.fillStyle = '#FFD700';
-        ctx.fillRect(28, 42, 4, 35);  // center stripe
-        ctx.fillRect(20, 50, 24, 3);  // horizontal stripe
+        ctx.fillRect(29, 40, 4, 32);
+        ctx.fillRect(21, 48, 22, 3);
 
         // Belt
         ctx.fillStyle = '#654321';
-        ctx.fillRect(14, 78, 36, 6);
-        ctx.fillStyle = '#FFD700';
-        ctx.fillRect(28, 78, 8, 6); // buckle
+        ctx.fillRect(15, 76, 34, 5);
 
         // Arms
         ctx.fillStyle = '#DDBB88';
-        ctx.fillRect(4, 44, 12, 10);  // left
-        ctx.fillRect(48, 44, 12, 10); // right
+        ctx.fillRect(5, 42, 11, 8);
+        ctx.fillRect(48, 42, 11, 8);
 
-        // Shield (left side)
+        // Shield
         ctx.fillStyle = '#654321';
         ctx.beginPath();
-        ctx.arc(4, 62, 14, 0, Math.PI * 2);
+        ctx.arc(5, 58, 12, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#FFD700';
         ctx.beginPath();
-        ctx.arc(4, 62, 5, 0, Math.PI * 2);
+        ctx.arc(5, 58, 4, 0, Math.PI * 2);
         ctx.fill();
 
-        // Axe (right side)
+        // Axe
         ctx.fillStyle = '#8B4513';
-        ctx.fillRect(56, 35, 4, 40);  // handle
+        ctx.fillRect(54, 33, 3, 36);
         ctx.fillStyle = '#888';
         ctx.beginPath();
-        ctx.moveTo(60, 35);
-        ctx.lineTo(72, 30);
-        ctx.lineTo(72, 48);
-        ctx.lineTo(60, 43);
+        ctx.moveTo(57, 33);
+        ctx.lineTo(68, 29);
+        ctx.lineTo(68, 44);
+        ctx.lineTo(57, 40);
         ctx.fill();
 
         // Head
         ctx.fillStyle = '#DDBB88';
         ctx.beginPath();
-        ctx.arc(32, 28, 15, 0, Math.PI * 2);
+        ctx.arc(32, 26, 14, 0, Math.PI * 2);
         ctx.fill();
 
         // Beard
-        ctx.fillStyle = variant % 2 === 0 ? '#D2691E' : '#FFD700';
+        ctx.fillStyle = variant % 2 === 0 ? '#D2691E' : '#B8860B';
         ctx.beginPath();
-        ctx.moveTo(20, 32);
-        ctx.quadraticCurveTo(32, 52, 44, 32);
+        ctx.moveTo(21, 30);
+        ctx.quadraticCurveTo(32, 48, 43, 30);
         ctx.fill();
 
         // Helmet
         ctx.fillStyle = '#888';
         ctx.beginPath();
-        ctx.arc(32, 24, 16, Math.PI, 0);
+        ctx.arc(32, 22, 15, Math.PI, 0);
         ctx.fill();
         // Horns
         ctx.fillStyle = '#F5DEB3';
         ctx.beginPath();
-        ctx.moveTo(16, 22);
-        ctx.quadraticCurveTo(6, 5, 10, 2);
-        ctx.quadraticCurveTo(14, 8, 18, 20);
+        ctx.moveTo(17, 20);
+        ctx.quadraticCurveTo(7, 4, 11, 1);
+        ctx.quadraticCurveTo(15, 7, 19, 18);
         ctx.fill();
         ctx.beginPath();
-        ctx.moveTo(48, 22);
-        ctx.quadraticCurveTo(58, 5, 54, 2);
-        ctx.quadraticCurveTo(50, 8, 46, 20);
+        ctx.moveTo(47, 20);
+        ctx.quadraticCurveTo(57, 4, 53, 1);
+        ctx.quadraticCurveTo(49, 7, 45, 18);
         ctx.fill();
 
         // Eyes
         ctx.fillStyle = '#fff';
-        ctx.fillRect(24, 24, 6, 5);
-        ctx.fillRect(34, 24, 6, 5);
+        ctx.fillRect(24, 22, 5, 4);
+        ctx.fillRect(35, 22, 5, 4);
         ctx.fillStyle = '#000';
-        ctx.fillRect(27, 25, 3, 3);
-        ctx.fillRect(37, 25, 3, 3);
+        ctx.fillRect(26, 23, 3, 2);
+        ctx.fillRect(37, 23, 3, 2);
 
         ctx.restore();
     }
 
-    function getCharTexture(isEnemy) {
-        const type = isEnemy ? 'viking' : 'warrior';
-        const cache = charCache[type];
-        const variant = Math.floor(Math.random() * 4);
-
-        // Check cache
-        if (cache[variant]) return cache[variant];
+    function getCharTexture(type, variant) {
+        const key = type + variant;
+        if (charTexCache[key]) return charTexCache[key];
 
         const canvas = document.createElement('canvas');
         canvas.width = 128;
         canvas.height = 128;
         const ctx = canvas.getContext('2d');
 
-        if (isEnemy) drawViking(ctx, variant);
+        if (type === 'viking') drawViking(ctx, variant);
         else drawWarrior(ctx, variant);
 
         const tex = new THREE.CanvasTexture(canvas);
-        tex.minFilter = THREE.NearestFilter;
-        tex.magFilter = THREE.NearestFilter;
-        cache[variant] = tex;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        charTexCache[key] = tex;
         return tex;
     }
 
     // ─── Create Entities ────────────────────────────────────────────
-    function createRunner(x, z, isEnemy) {
-        const tex = getCharTexture(isEnemy);
+
+    function createCharSprite(x, z, type) {
+        const variant = Math.floor(Math.random() * 4);
+        const tex = getCharTexture(type, variant);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
         const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(1.4, 1.4, 1);
-        sprite.position.set(x, 0.7, z);
-        sprite.userData = {
-            baseX: x, baseZ: z,
-            phase: Math.random() * Math.PI * 2,
-            isEnemy, dead: false,
-        };
-
+        sprite.scale.set(1.8, 1.8, 1);
+        sprite.position.set(x, 0.9, z);
         scene.add(sprite);
         return sprite;
     }
 
-    function updateRunners() {
-        const target = Math.min(Math.round(crowdCount), 80);
-        while (runners.length < target) {
-            const a = Math.random() * Math.PI * 2;
-            const r = Math.sqrt(Math.random()) * Math.min(3.5, Math.sqrt(runners.length + 1) * 0.6);
-            runners.push(createRunner(Math.cos(a) * r, Math.sin(a) * r, false));
-        }
-        while (runners.length > target) {
-            scene.remove(runners.pop());
+    function createSquadMember(index) {
+        const spread = Math.min(squadCount - 1, 5) * 0.8;
+        const x = squadCount === 1 ? 0 : -spread / 2 + (index / Math.max(1, squadCount - 1)) * spread;
+        const sprite = createCharSprite(x, DEFENSE_Z + 2, 'warrior');
+        sprite.userData = { index, baseX: x, phase: Math.random() * Math.PI * 2 };
+        return sprite;
+    }
+
+    function rebuildSquad() {
+        squad.forEach(s => scene.remove(s));
+        squad = [];
+        for (let i = 0; i < squadCount; i++) {
+            squad.push(createSquadMember(i));
         }
     }
 
-    function createGatePair(z, lvl) {
+    function spawnEnemy(z, hp) {
+        const x = (Math.random() - 0.5) * (ARENA_WIDTH - 2);
+        const sprite = createCharSprite(x, z, 'viking');
+        sprite.userData.hp = hp;
+        sprite.userData.maxHp = hp;
+        sprite.userData.speed = diff.enemySpeed * (0.8 + Math.random() * 0.4);
+        sprite.userData.wobble = Math.random() * Math.PI * 2;
+
+        // HP label
+        const hpSprite = createTextSprite(hp.toString(), '#ffffff', 0.7);
+        hpSprite.position.set(x, 2.2, z);
+        scene.add(hpSprite);
+        sprite.userData.hpSprite = hpSprite;
+
+        enemies.push(sprite);
+    }
+
+    function spawnBarrel(z) {
+        const x = (Math.random() - 0.5) * (ARENA_WIDTH - 3);
         const group = new THREE.Group();
-        group.position.z = z;
+        group.position.set(x, 0, z);
 
-        // Generate operations
-        let leftOp, rightOp;
-        if (Math.random() < 0.5) {
-            const m = Math.random() < 0.25 + lvl * 0.02 ? 3 : 2;
-            leftOp = { op: 'x', val: m, label: '×' + m };
-        } else {
-            const a = 3 + Math.floor(Math.random() * (4 + lvl * 2));
-            leftOp = { op: '+', val: a, label: '+' + a };
-        }
-
-        const r = Math.random();
-        if (r < 0.3) {
-            const s = 2 + Math.floor(Math.random() * (2 + lvl));
-            rightOp = { op: '-', val: s, label: '-' + s };
-        } else if (r < 0.55) {
-            rightOp = { op: '/', val: 2, label: '÷2' };
-        } else if (r < 0.75) {
-            const a = 1 + Math.floor(Math.random() * 4);
-            rightOp = { op: '+', val: a, label: '+' + a };
-        } else {
-            rightOp = { op: 'x', val: 2, label: '×2' };
-        }
-
-        if (Math.random() < 0.5) { const tmp = leftOp; leftOp = rightOp; rightOp = tmp; }
-
-        // Create gate meshes
-        const leftGate = createGateMesh(leftOp, -3);
-        const rightGate = createGateMesh(rightOp, 3);
-        group.add(leftGate);
-        group.add(rightGate);
-
-        // Pillars
-        [-5.5, 0, 5.5].forEach(px => {
-            const p = new THREE.Mesh(GEO.pillar, MAT.pillar);
-            p.position.set(px, 2, 0);
-            p.castShadow = true;
-            group.add(p);
-        });
-
-        // Top bar
-        const topBar = new THREE.Mesh(
-            new THREE.BoxGeometry(11, 0.3, 0.3),
-            MAT.pillar
-        );
-        topBar.position.set(0, 4, 0);
-        group.add(topBar);
-
-        scene.add(group);
-
-        return {
-            group, z, leftOp, rightOp,
-            passed: false,
-        };
-    }
-
-    function createGateMesh(op, xPos) {
-        const isGood = op.op === '+' || op.op === 'x';
-        const isGreat = op.op === 'x' && op.val >= 3;
-        const mat = isGreat ? MAT.gateGreat : isGood ? MAT.gateGood : MAT.gateBad;
-
-        const g = new THREE.Group();
-        const frame = new THREE.Mesh(GEO.gateFrame, mat);
-        frame.position.set(0, 1.75, 0);
-        g.add(frame);
-
-        // Text sprite
-        const canvas = document.createElement('canvas');
-        canvas.width = 256; canvas.height = 128;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = isGreat ? '#7c3aed' : isGood ? '#00aa44' : '#cc3333';
-        ctx.fillRect(0, 0, 256, 128);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 80px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(op.label, 128, 64);
-
-        const tex = new THREE.CanvasTexture(canvas);
-        const textMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(4, 2),
-            new THREE.MeshBasicMaterial({ map: tex, transparent: true })
-        );
-        textMesh.position.set(0, 2, 0.15);
-        g.add(textMesh);
-
-        g.position.x = xPos;
-        return g;
-    }
-
-    function createWall(z, hp) {
-        const group = new THREE.Group();
-        group.position.z = z;
-
-        // Build wall from blocks
-        const cols = 8;
-        const rows = 3;
-        for (let r = 0; r < rows; r++) {
-            const offset = r % 2 === 0 ? 0 : 0.5;
-            for (let c = 0; c < cols; c++) {
-                const block = new THREE.Mesh(GEO.wallBlock, MAT.wall);
-                block.position.set(-3.5 + c + offset, 0.5 + r, 0);
-                block.castShadow = true;
-                group.add(block);
-            }
-        }
-
-        // Number sprite
-        const sprite = createTextSprite(hp.toString(), '#ffffff', 1.5);
-        sprite.position.set(0, 1.5, 0.6);
-        group.add(sprite);
-
-        scene.add(group);
-
-        return { group, z, hp, maxHp: hp, sprite, smashed: false };
-    }
-
-    function createEnemyGroup(z, count, lvl) {
-        const units = [];
-        const spread = Math.min(4, Math.sqrt(count) * 0.8);
-        for (let i = 0; i < count; i++) {
-            const a = Math.random() * Math.PI * 2;
-            const r = Math.sqrt(Math.random()) * spread;
-            const unit = createRunner(Math.cos(a) * r, z + Math.sin(a) * r - 2, true);
-            units.push(unit);
-        }
-
-        const sprite = createTextSprite(count.toString(), '#ff6666', 1.2);
-        sprite.position.set(0, 2.8, z - 1);
-        scene.add(sprite);
-
-        return { units, z, alive: count, countSprite: sprite, wallIndex: walls.length - 1 };
-    }
-
-    function createBoss(z) {
-        const group = new THREE.Group();
-        group.position.z = z;
-
-        // Large boss body
+        // Barrel body
         const body = new THREE.Mesh(
-            new THREE.BoxGeometry(10, 5, 2),
-            MAT.boss
+            new THREE.CylinderGeometry(0.6, 0.7, 1.2, 12),
+            MAT.barrel
         );
-        body.position.y = 2.5;
+        body.position.y = 0.6;
         body.castShadow = true;
         group.add(body);
 
-        // Eyes
-        const eyeGeo = new THREE.SphereGeometry(0.5, 8, 8);
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xfeca57 });
-        const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-        leftEye.position.set(-1.5, 3.2, 1.1);
-        group.add(leftEye);
-        const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-        rightEye.position.set(1.5, 3.2, 1.1);
-        group.add(rightEye);
-
-        // Pupils
-        const pupilGeo = new THREE.SphereGeometry(0.2, 6, 6);
-        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-        const lp = new THREE.Mesh(pupilGeo, pupilMat);
-        lp.position.set(-1.5, 3.2, 1.5);
-        group.add(lp);
-        const rp = new THREE.Mesh(pupilGeo, pupilMat);
-        rp.position.set(1.5, 3.2, 1.5);
-        group.add(rp);
-
-        // Mouth (jagged teeth)
-        for (let i = 0; i < 6; i++) {
-            const tooth = new THREE.Mesh(
-                new THREE.ConeGeometry(0.2, 0.5, 3),
-                new THREE.MeshStandardMaterial({ color: 0xffffff })
+        // Metal rings
+        for (const ry of [0.2, 0.6, 1.0]) {
+            const ring = new THREE.Mesh(
+                new THREE.TorusGeometry(0.63, 0.04, 4, 12),
+                MAT.barrelRing
             );
-            tooth.position.set(-2 + i * 0.8, 1.8 + (i % 2 === 0 ? 0 : 0.2), 1.1);
-            tooth.rotation.x = Math.PI;
-            group.add(tooth);
+            ring.position.y = ry;
+            ring.rotation.x = Math.PI / 2;
+            group.add(ring);
         }
 
-        // HP text
-        const sprite = createTextSprite(bossMaxHP.toString(), '#ffffff', 2);
-        sprite.position.set(0, 0.5, 1.5);
-        group.add(sprite);
-        group.userData = { hpSprite: sprite };
+        // Determine barrel type
+        const types = ['damage', 'fireRate', 'squad', 'coins'];
+        const weights = [3, 3, 1, 4];
+        let total = weights.reduce((a, b) => a + b);
+        let r = Math.random() * total;
+        let type = types[0];
+        for (let i = 0; i < weights.length; i++) {
+            r -= weights[i];
+            if (r <= 0) { type = types[i]; break; }
+        }
 
+        const hp = Math.ceil((3 + wave * 1.5) * diff.enemyHP);
+        const colors = { damage: '#ff4444', fireRate: '#44aaff', squad: '#44ff88', coins: '#ffdd44' };
+        const labels = { damage: 'DMG+', fireRate: 'FIRE+', squad: 'ALLY+', coins: 'COINS' };
+
+        // Glow top
+        const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.3, 8, 8),
+            new THREE.MeshBasicMaterial({ color: colors[type], transparent: true, opacity: 0.7 })
+        );
+        glow.position.y = 1.4;
+        group.add(glow);
+
+        // Label
+        const label = createTextSprite(labels[type], colors[type], 0.6);
+        label.position.set(0, 2, 0);
+        group.add(label);
+
+        // HP label
+        const hpLabel = createTextSprite(hp.toString(), '#ffffff', 0.5);
+        hpLabel.position.set(0, 0.6, 0.8);
+        group.add(hpLabel);
+
+        group.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.5, hpLabel, glow };
         scene.add(group);
-        return group;
+        barrels.push(group);
     }
 
-    function createTextSprite(text, color, scale, large) {
+    function createBullet(fromX, fromZ, toX, toZ) {
+        const dir = new THREE.Vector3(toX - fromX, 0, toZ - fromZ).normalize();
+
+        const group = new THREE.Group();
+        group.position.set(fromX, 1, fromZ);
+
+        const core = new THREE.Mesh(
+            new THREE.SphereGeometry(0.12, 6, 6),
+            MAT.bullet
+        );
+        group.add(core);
+
+        const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.25, 6, 6),
+            MAT.bulletGlow
+        );
+        group.add(glow);
+
+        group.userData = { dir, damage: bulletDamage, life: 2.5 };
+        scene.add(group);
+        bullets.push(group);
+
+        SFX.shoot();
+    }
+
+    function spawnParticles(x, y, z, color, count) {
+        for (let i = 0; i < count; i++) {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.15, 0.15, 0.15),
+                new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
+            );
+            mesh.position.set(x, y, z);
+            mesh.userData = {
+                vel: new THREE.Vector3(
+                    (Math.random() - 0.5) * 6,
+                    Math.random() * 5 + 2,
+                    (Math.random() - 0.5) * 6
+                ),
+                life: 0.6 + Math.random() * 0.4,
+            };
+            scene.add(mesh);
+            particles.push(mesh);
+        }
+    }
+
+    function spawnCoinPickup(x, z, amount) {
+        const mesh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.3, 0.3, 0.1, 8),
+            MAT.coin
+        );
+        mesh.rotation.x = Math.PI / 2;
+        mesh.position.set(x, 1.5, z);
+        mesh.userData = { amount, life: 2, vy: 3 };
+        scene.add(mesh);
+        coinPickups.push(mesh);
+    }
+
+    // ─── Text Sprites ───────────────────────────────────────────────
+    function createTextSprite(text, color, scale) {
         const canvas = document.createElement('canvas');
-        const w = large ? 512 : 256;
-        const h = large ? 256 : 128;
-        canvas.width = w; canvas.height = h;
+        canvas.width = 256;
+        canvas.height = 128;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = color;
-        ctx.font = large ? 'bold 180px system-ui' : 'bold 90px system-ui';
+        ctx.font = 'bold 72px system-ui';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.strokeStyle = large ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = large ? 12 : 6;
-        ctx.strokeText(text, w / 2, h / 2);
-        ctx.fillText(text, w / 2, h / 2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.lineWidth = 5;
+        ctx.strokeText(text, 128, 64);
+        ctx.fillText(text, 128, 64);
 
         const tex = new THREE.CanvasTexture(canvas);
         const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
         const sprite = new THREE.Sprite(spriteMat);
         sprite.scale.set(scale * 2, scale, 1);
-        sprite.userData = { canvas, ctx, tex, large: !!large };
+        sprite.userData.canvas = canvas;
+        sprite.userData.ctx = ctx;
+        sprite.userData.tex = tex;
         return sprite;
     }
 
     function updateSpriteText(sprite, text, color) {
-        const { canvas, ctx, tex, large } = sprite.userData;
-        const w = canvas.width, h = canvas.height;
-        ctx.clearRect(0, 0, w, h);
+        const { canvas, ctx, tex } = sprite.userData;
+        ctx.clearRect(0, 0, 256, 128);
         ctx.fillStyle = color || '#ffffff';
-        ctx.font = large ? 'bold 180px system-ui' : 'bold 90px system-ui';
+        ctx.font = 'bold 72px system-ui';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.strokeStyle = large ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = large ? 12 : 6;
-        ctx.strokeText(text, w / 2, h / 2);
-        ctx.fillText(text, w / 2, h / 2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.lineWidth = 5;
+        ctx.strokeText(text, 128, 64);
+        ctx.fillText(text, 128, 64);
         tex.needsUpdate = true;
     }
 
-    // ─── Ground ─────────────────────────────────────────────────────
-    function initGround() {
-        groundTiles.forEach(t => scene.remove(t));
-        groundTiles = [];
+    // ─── Wave System ────────────────────────────────────────────────
+    function startWave() {
+        wave++;
+        const enemyCount = Math.floor((5 + wave * 3) * diff.spawnRate);
+        const barrelCount = Math.floor((2 + wave * 0.8) * diff.barrelRate);
+        waveEnemiesLeft = enemyCount;
+        waveEnemiesTotal = enemyCount;
+        waveBarrelsLeft = barrelCount;
+        spawnTimer = 0;
+        barrelTimer = 0;
 
-        // Wide grass ground
-        const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(60, 600),
-            MAT.ground
-        );
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.z = -250;
-        ground.receiveShadow = true;
-        scene.add(ground);
-        groundTiles.push(ground);
+        state = 'playing';
+        hudEl.style.display = 'flex';
+        waveBar.style.display = 'block';
 
-        // Wider track (warm beige)
-        const track = new THREE.Mesh(
-            new THREE.PlaneGeometry(12, 600),
-            MAT.track
-        );
-        track.rotation.x = -Math.PI / 2;
-        track.position.y = 0.01;
-        track.position.z = -250;
-        track.receiveShadow = true;
-        scene.add(track);
-        groundTiles.push(track);
+        rebuildSquad();
+        updateHUD();
+        showActionText('WAVE ' + wave, '#ff6b35');
+    }
 
-        // Track edge strips
-        [-6.1, 6.1].forEach(x => {
-            const edge = new THREE.Mesh(
-                new THREE.PlaneGeometry(0.25, 600),
-                MAT.trackEdge
-            );
-            edge.rotation.x = -Math.PI / 2;
-            edge.position.set(x, 0.015, -250);
-            scene.add(edge);
-            groundTiles.push(edge);
+    function clearEntities() {
+        enemies.forEach(e => { scene.remove(e); if (e.userData.hpSprite) scene.remove(e.userData.hpSprite); });
+        barrels.forEach(b => scene.remove(b));
+        bullets.forEach(b => scene.remove(b));
+        particles.forEach(p => scene.remove(p));
+        coinPickups.forEach(c => scene.remove(c));
+        squad.forEach(s => scene.remove(s));
+        enemies = []; barrels = []; bullets = []; particles = []; coinPickups = []; squad = [];
+    }
+
+    // ─── Upgrades ───────────────────────────────────────────────────
+    const UPGRADE_DEFS = [
+        {
+            id: 'damage', name: 'Bullet Damage',
+            maxLevel: 10,
+            cost: lvl => 5 + lvl * 5,
+            apply: lvl => { bulletDamage = 1 + lvl; },
+            desc: lvl => `DMG ${1 + lvl} → ${2 + lvl}`,
+        },
+        {
+            id: 'fireRate', name: 'Fire Rate',
+            maxLevel: 8,
+            cost: lvl => 8 + lvl * 6,
+            apply: lvl => { fireRate = 2.5 + lvl * 0.8; },
+            desc: lvl => `${(2.5 + lvl * 0.8).toFixed(1)} → ${(2.5 + (lvl + 1) * 0.8).toFixed(1)}/s`,
+        },
+        {
+            id: 'squad', name: 'Extra Shooter',
+            maxLevel: 5,
+            cost: lvl => 15 + lvl * 12,
+            apply: lvl => { squadCount = 1 + lvl; },
+            desc: lvl => `${1 + lvl} → ${2 + lvl} shooters`,
+        },
+    ];
+
+    function showUpgradeShop() {
+        state = 'waveclear';
+        wsWave.textContent = wave;
+        wsCoins.textContent = coins;
+        waveScreen.classList.remove('hidden');
+        waveScreen.classList.add('active');
+        hudEl.style.display = 'none';
+        waveBar.style.display = 'none';
+
+        upgradeButtons.innerHTML = '';
+        UPGRADE_DEFS.forEach(def => {
+            const lvl = upgrades[def.id];
+            const maxed = lvl >= def.maxLevel;
+            const cost = def.cost(lvl);
+            const canAfford = coins >= cost;
+            const btn = document.createElement('button');
+            btn.className = 'upgrade-btn' + (maxed ? ' maxed' : '');
+            btn.innerHTML = `${def.name}<br><small>${maxed ? 'MAXED' : def.desc(lvl)}</small><span class="cost">${maxed ? '' : cost + ' coins'}</span>`;
+            if (!maxed && canAfford) {
+                btn.addEventListener('click', () => {
+                    coins -= cost;
+                    upgrades[def.id]++;
+                    def.apply(upgrades[def.id]);
+                    SFX.upgrade();
+                    showUpgradeShop(); // refresh
+                });
+            } else if (!maxed) {
+                btn.style.opacity = '0.5';
+            }
+            upgradeButtons.appendChild(btn);
         });
-
-        // Subtle center dashes (no solid line — just track color contrast)
-        const centerLine = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.12, 600),
-            MAT.trackLine
-        );
-        centerLine.rotation.x = -Math.PI / 2;
-        centerLine.position.y = 0.02;
-        centerLine.position.z = -250;
-        scene.add(centerLine);
-        groundTiles.push(centerLine);
-    }
-
-    // ─── Shooting ───────────────────────────────────────────────────
-    function findTarget() {
-        // Find nearest enemy or wall ahead
-        let best = null;
-        let bestDist = Infinity;
-
-        for (const eg of enemies) {
-            if (eg.alive <= 0) continue;
-            const dz = -(eg.z - distance * (1 / speed));
-            if (dz > 2 && dz < 40 && dz < bestDist) {
-                bestDist = dz;
-                best = { type: 'enemy', eg };
-            }
-        }
-
-        for (const w of walls) {
-            if (w.smashed) continue;
-            const wz = w.group.position.z;
-            if (wz < -2 && wz > -40 && -wz < bestDist) {
-                bestDist = -wz;
-                best = { type: 'wall', wall: w };
-            }
-        }
-
-        if (bossObj && bossHP > 0) {
-            const bz = bossObj.position.z;
-            if (bz < 0 && bz > -50 && -bz < bestDist) {
-                best = { type: 'boss' };
-            }
-        }
-
-        return best;
-    }
-
-    function fireBullets(dt) {
-        fireCooldown -= dt;
-        if (fireCooldown > 0 || runners.length === 0) return;
-
-        const target = findTarget();
-        if (!target) return;
-
-        const shotsPerSec = Math.min(3 + crowdCount * 0.4, 15);
-        fireCooldown = 1 / shotsPerSec;
-
-        const count = Math.min(Math.ceil(crowdCount / 4), 4);
-        for (let i = 0; i < count; i++) {
-            const r = runners[Math.floor(Math.random() * runners.length)];
-            if (!r) continue;
-
-            // Bullet group: bright core + glow halo + trail
-            const bulletGroup = new THREE.Group();
-
-            // Core (bright yellow)
-            const core = new THREE.Mesh(GEO.bullet, MAT.bullet);
-            bulletGroup.add(core);
-
-            // Glow halo (larger, transparent)
-            const glow = new THREE.Mesh(
-                new THREE.SphereGeometry(0.3, 6, 6),
-                MAT.bulletGlow
-            );
-            bulletGroup.add(glow);
-
-            // Trail cylinder
-            const trail = new THREE.Mesh(GEO.bulletTrail, MAT.bulletTrail);
-            trail.rotation.x = Math.PI / 2;
-            trail.position.z = 0.35;
-            bulletGroup.add(trail);
-
-            bulletGroup.position.copy(r.position);
-            bulletGroup.position.y += 0.8;
-
-            let targetPos;
-            if (target.type === 'enemy') {
-                const alive = target.eg.units.filter(u => !u.userData.dead);
-                if (alive.length > 0) {
-                    const t = alive[Math.floor(Math.random() * alive.length)];
-                    targetPos = t.position.clone();
-                } else continue;
-            } else if (target.type === 'wall') {
-                targetPos = target.wall.group.position.clone();
-                targetPos.y = 1.5;
-                targetPos.x += (Math.random() - 0.5) * 4;
-            } else {
-                targetPos = bossObj.position.clone();
-                targetPos.y = 2.5;
-                targetPos.x += (Math.random() - 0.5) * 4;
-            }
-
-            const dir = targetPos.sub(bulletGroup.position).normalize();
-            // Orient bullet toward target
-            bulletGroup.lookAt(bulletGroup.position.clone().add(dir));
-
-            bulletGroup.userData = {
-                vel: dir.multiplyScalar(40),
-                life: 2.0,
-                target: target.type,
-            };
-
-            scene.add(bulletGroup);
-            bullets3d.push(bulletGroup);
-
-            if (Math.random() < 0.3) SFX.shoot();
-        }
-    }
-
-    function updateBullets(dt) {
-        for (let i = bullets3d.length - 1; i >= 0; i--) {
-            const b = bullets3d[i];
-            b.position.add(b.userData.vel.clone().multiplyScalar(dt));
-            b.userData.life -= dt;
-
-            // Pulse the glow
-            if (b.children && b.children[1]) {
-                const s = 0.8 + Math.sin(Date.now() * 0.03 + i) * 0.3;
-                b.children[1].scale.setScalar(s);
-            }
-
-            if (b.userData.life <= 0) {
-                scene.remove(b);
-                bullets3d.splice(i, 1);
-                continue;
-            }
-
-            let hit = false;
-
-            // Check enemy hits
-            for (const eg of enemies) {
-                if (eg.alive <= 0) continue;
-                for (const u of eg.units) {
-                    if (u.userData.dead) continue;
-                    if (b.position.distanceTo(u.position) < 0.8) {
-                        u.userData.dead = true;
-                        scene.remove(u);
-                        eg.alive--;
-                        updateSpriteText(eg.countSprite, eg.alive.toString(), '#ff6666');
-
-                        spawnParticles(u.position, 0xcc2222, 5);
-                        SFX.hit();
-
-                        // Damage associated wall
-                        if (eg.wallIndex >= 0 && eg.wallIndex < walls.length) {
-                            const w = walls[eg.wallIndex];
-                            if (!w.smashed) {
-                                w.hp = Math.max(0, w.hp - 1);
-                                updateSpriteText(w.sprite, w.hp.toString(), '#ffffff');
-                                if (w.hp <= 0) smashWall(w);
-                            }
-                        }
-                        hit = true;
-                        break;
-                    }
-                }
-                if (hit) break;
-            }
-
-            // Check gate hits — shooting gates changes their values!
-            if (!hit) {
-                for (const g of gates) {
-                    if (g.passed) continue;
-                    const gp = g.group.position;
-                    if (Math.abs(b.position.z - gp.z) < 0.8 && b.position.y < 4.5) {
-                        // Which gate did we hit? Left (x < 0) or right (x > 0)?
-                        const bx = b.position.x;
-                        let hitOp = null;
-                        let side = null;
-                        if (bx < 0 && bx > -5.5) { hitOp = g.leftOp; side = 'left'; }
-                        else if (bx > 0 && bx < 5.5) { hitOp = g.rightOp; side = 'right'; }
-
-                        if (hitOp) {
-                            const isGood = hitOp.op === '+' || hitOp.op === 'x';
-                            if (isGood) {
-                                // Shooting good gates increases their value
-                                if (hitOp.op === '+') {
-                                    hitOp.val += 1;
-                                    hitOp.label = '+' + hitOp.val;
-                                } else if (hitOp.op === 'x') {
-                                    // Small chance to increment multiplier
-                                    if (Math.random() < 0.15) {
-                                        hitOp.val = Math.min(hitOp.val + 1, 5);
-                                        hitOp.label = '×' + hitOp.val;
-                                    }
-                                }
-                                spawnParticles(b.position, 0x00ff88, 4);
-                            } else {
-                                // Shooting bad gates reduces their penalty
-                                if (hitOp.op === '-') {
-                                    hitOp.val = Math.max(0, hitOp.val - 1);
-                                    hitOp.label = hitOp.val === 0 ? '±0' : '-' + hitOp.val;
-                                } else if (hitOp.op === '/') {
-                                    // Chance to neutralize divide
-                                    if (Math.random() < 0.2) {
-                                        hitOp.op = '+'; hitOp.val = 1; hitOp.label = '+1';
-                                    }
-                                }
-                                spawnParticles(b.position, 0xff8844, 4);
-                            }
-
-                            // Update the gate's text visually
-                            const gateGroup = side === 'left' ? g.group.children[0] : g.group.children[1];
-                            if (gateGroup) {
-                                // Find the text mesh (PlaneGeometry child)
-                                gateGroup.traverse(child => {
-                                    if (child.material && child.material.map) {
-                                        const c = child.material.map.image.getContext('2d');
-                                        const isG = hitOp.op === '+' || hitOp.op === 'x';
-                                        const isGr = hitOp.op === 'x' && hitOp.val >= 3;
-                                        c.clearRect(0, 0, 256, 128);
-                                        c.fillStyle = isGr ? '#7c3aed' : isG ? '#00aa44' : '#cc3333';
-                                        c.fillRect(0, 0, 256, 128);
-                                        c.fillStyle = '#ffffff';
-                                        c.font = 'bold 80px system-ui';
-                                        c.textAlign = 'center';
-                                        c.textBaseline = 'middle';
-                                        c.fillText(hitOp.label, 128, 64);
-                                        child.material.map.needsUpdate = true;
-                                    }
-                                });
-                            }
-
-                            hit = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Check wall hits
-            if (!hit) {
-                for (const w of walls) {
-                    if (w.smashed) continue;
-                    const wp = w.group.position;
-                    if (Math.abs(b.position.z - wp.z) < 1 &&
-                        Math.abs(b.position.x - wp.x) < 4 &&
-                        b.position.y < 4) {
-                        w.hp = Math.max(0, w.hp - 1);
-                        updateSpriteText(w.sprite, w.hp.toString(), '#ffffff');
-                        spawnParticles(b.position, 0xcc4444, 3);
-                        if (w.hp <= 0) smashWall(w);
-                        hit = true;
-                        break;
-                    }
-                }
-            }
-
-            // Check boss hits
-            if (!hit && bossObj && bossHP > 0) {
-                const bp = bossObj.position;
-                if (Math.abs(b.position.z - bp.z) < 1.5 &&
-                    Math.abs(b.position.x - bp.x) < 5 &&
-                    b.position.y < 6) {
-                    bossHP = Math.max(0, bossHP - 1);
-                    updateSpriteText(bossObj.userData.hpSprite, Math.ceil(bossHP).toString(), '#ffffff');
-                    spawnParticles(b.position, 0xfeca57, 3);
-                    SFX.bossHit();
-                    if (bossHP <= 0) {
-                        defeatBoss();
-                    }
-                    hit = true;
-                }
-            }
-
-            if (hit) {
-                scene.remove(b);
-                bullets3d.splice(i, 1);
-            }
-        }
-    }
-
-    function smashWall(w) {
-        w.smashed = true;
-        score += w.maxHp * 10;
-        spawnParticles(w.group.position.clone().setY(1.5), 0xcc4444, 20);
-        SFX.wallBreak();
-        shake(0.3);
-
-        // Animate wall falling apart
-        w.group.children.forEach(child => {
-            if (child.isMesh && child.geometry === GEO.wallBlock) {
-                const vx = (Math.random() - 0.5) * 8;
-                const vy = 3 + Math.random() * 5;
-                const vz = (Math.random() - 0.5) * 4;
-                animateDebris(child, w.group, vx, vy, vz);
-            }
-        });
-
-        setTimeout(() => { scene.remove(w.group); }, 1500);
-    }
-
-    function animateDebris(mesh, parent, vx, vy, vz) {
-        const worldPos = new THREE.Vector3();
-        mesh.getWorldPosition(worldPos);
-        parent.remove(mesh);
-        mesh.position.copy(worldPos);
-        scene.add(mesh);
-
-        const startTime = Date.now();
-        function animStep() {
-            const elapsed = (Date.now() - startTime) / 1000;
-            if (elapsed > 1.5) { scene.remove(mesh); return; }
-            mesh.position.x += vx * 0.016;
-            mesh.position.y += (vy - 9.8 * elapsed) * 0.016;
-            mesh.position.z += vz * 0.016;
-            mesh.rotation.x += 0.1;
-            mesh.rotation.z += 0.05;
-            requestAnimationFrame(animStep);
-        }
-        animStep();
-    }
-
-    function defeatBoss() {
-        score += bossMaxHP * 20;
-        spawnParticles(bossObj.position.clone().setY(2.5), 0xfeca57, 40);
-        spawnParticles(bossObj.position.clone().setY(2.5), 0xff6b9d, 30);
-        shake(0.8);
-        SFX.levelComplete();
-
-        showActionText('LEVEL COMPLETE!', '#51cf66');
-
-        // Slow-mo
-        timescaleTarget = 0.3;
-        setTimeout(() => { timescaleTarget = 1; }, 800);
-
-        state = 'complete';
-        setTimeout(() => {
-            level++;
-            startLevel();
-        }, 2500);
-    }
-
-    // ─── Particles ──────────────────────────────────────────────────
-    function spawnParticles(pos, color, count) {
-        for (let i = 0; i < count; i++) {
-            const geo = new THREE.SphereGeometry(0.08 + Math.random() * 0.1, 4, 4);
-            const mat = new THREE.MeshBasicMaterial({ color });
-            const p = new THREE.Mesh(geo, mat);
-            p.position.copy(pos);
-            p.userData = {
-                vel: new THREE.Vector3(
-                    (Math.random() - 0.5) * 6,
-                    2 + Math.random() * 5,
-                    (Math.random() - 0.5) * 6
-                ),
-                life: 0.6 + Math.random() * 0.4,
-            };
-            scene.add(p);
-            particles3d.push(p);
-        }
-    }
-
-    function updateParticles(dt) {
-        for (let i = particles3d.length - 1; i >= 0; i--) {
-            const p = particles3d[i];
-            p.position.add(p.userData.vel.clone().multiplyScalar(dt));
-            p.userData.vel.y -= 12 * dt;
-            p.userData.life -= dt;
-            p.material.opacity = Math.max(0, p.userData.life / 0.8);
-            p.material.transparent = true;
-            if (p.userData.life <= 0) {
-                scene.remove(p);
-                particles3d.splice(i, 1);
-            }
-        }
     }
 
     // ─── Effects ────────────────────────────────────────────────────
@@ -1159,225 +730,338 @@
         actionText.textContent = text;
         actionText.style.color = color || '#fff';
         actionText.classList.add('show');
-        setTimeout(() => actionText.classList.remove('show'), 1500);
+        setTimeout(() => actionText.classList.remove('show'), 1200);
     }
 
     function updateHUD() {
-        countDisplay.textContent = Math.round(crowdCount);
-        levelDisplay.textContent = level;
+        waveDisplay.textContent = wave;
+        squadDisplay.textContent = squadCount;
+        coinDisplay.textContent = coins;
     }
 
-    // ─── Gate Logic ─────────────────────────────────────────────────
-    function applyGate(op) {
-        const old = crowdCount;
-        switch (op.op) {
-            case '+': crowdCount += op.val; break;
-            case '-': crowdCount = Math.max(1, crowdCount - op.val); break;
-            case 'x': crowdCount *= op.val; break;
-            case '/': crowdCount = Math.max(1, Math.ceil(crowdCount / op.val)); break;
-        }
-        crowdCount = Math.min(crowdCount, 999);
-        const diff = crowdCount - old;
+    // ─── Aiming ─────────────────────────────────────────────────────
+    function findNearestTarget() {
+        let best = null;
+        let bestDist = Infinity;
 
-        if (diff > 0) {
-            if (op.op === 'x' && op.val >= 3) {
-                SFX.gateGreat();
-                showActionText(op.label + '!', '#a78bfa');
-                timescaleTarget = 0.4;
-                setTimeout(() => { timescaleTarget = 1; }, 200);
-                shake(0.4);
-            } else {
-                SFX.gateGood();
-                shake(0.15);
-            }
-            // Haptic
-            if (navigator.vibrate) navigator.vibrate(30);
-        } else {
-            SFX.gateBad();
-            shake(0.25);
-            if (navigator.vibrate) navigator.vibrate([20, 20, 40]);
+        // Check enemies
+        for (const e of enemies) {
+            const d = e.position.distanceTo(new THREE.Vector3(aimX, 0, DEFENSE_Z));
+            if (d < bestDist) { bestDist = d; best = e; }
         }
 
-        updateRunners();
-        updateHUD();
+        // Check barrels
+        for (const b of barrels) {
+            const d = b.position.distanceTo(new THREE.Vector3(aimX, 0, DEFENSE_Z));
+            if (d < bestDist) { bestDist = d; best = b; }
+        }
 
-        // Number animation
-        countAnim.scale = 1.5;
-        countAnim.targetScale = 1;
-        countAnim.color = diff > 0 ? '#51cf66' : '#ff6b6b';
-        countAnim.colorTimer = 0.4;
-
-        return diff;
+        return best;
     }
 
     // ─── Main Update ────────────────────────────────────────────────
     function update(dt) {
-        if (state === 'menu' || state === 'gameover') return;
+        if (state !== 'playing') return;
+        const time = Date.now() * 0.001;
 
-        // Timescale
-        timescale += (timescaleTarget - timescale) * Math.min(1, dt * 8);
-        dt *= timescale;
+        // ── Spawn enemies ──
+        const spawnInterval = Math.max(0.4, 2.5 - wave * 0.12) / diff.spawnRate;
+        spawnTimer += dt;
+        if (waveEnemiesLeft > 0 && spawnTimer >= spawnInterval) {
+            spawnTimer = 0;
+            const hp = Math.ceil((2 + wave * 1.5 + Math.random() * wave) * diff.enemyHP);
+            const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
+            spawnEnemy(z, hp);
+            waveEnemiesLeft--;
+        }
 
-        // Smooth crowd movement
-        crowdX += (targetX - crowdX) * 0.1;
+        // ── Spawn barrels ──
+        const barrelInterval = Math.max(1.5, 4 - wave * 0.15) / diff.barrelRate;
+        barrelTimer += dt;
+        if (waveBarrelsLeft > 0 && barrelTimer >= barrelInterval) {
+            barrelTimer = 0;
+            const z = SPAWN_Z_MIN + Math.random() * 5;
+            spawnBarrel(z);
+            waveBarrelsLeft--;
+        }
 
-        if (state === 'running' || state === 'complete') {
-            // Move everything toward camera (world scrolls, player stays at z=0)
-            const moveZ = speed * dt * 60;
+        // ── Move enemies toward defense line ──
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            const e = enemies[i];
+            // Slow steady march + wobble
+            e.position.z += e.userData.speed * dt;
+            e.position.x += Math.sin(time * 2 + e.userData.wobble) * 0.3 * dt;
+            e.position.x = Math.max(-ARENA_WIDTH / 2 + 0.5, Math.min(ARENA_WIDTH / 2 - 0.5, e.position.x));
+            e.position.y = 0.9 + Math.abs(Math.sin(time * 3 + e.userData.wobble)) * 0.1;
 
-            gates.forEach(g => g.group.position.z += moveZ);
-            walls.forEach(w => { if (!w.smashed) w.group.position.z += moveZ; });
-            enemies.forEach(eg => {
-                eg.units.forEach(u => { if (!u.userData.dead) u.position.z += moveZ; });
-                eg.countSprite.position.z += moveZ;
-            });
-            if (bossObj) bossObj.position.z += moveZ;
+            // Update HP sprite position
+            if (e.userData.hpSprite) {
+                e.userData.hpSprite.position.copy(e.position);
+                e.userData.hpSprite.position.y += 1.3;
+            }
 
-            distance += moveZ;
-
-            // Progress
-            const prog = Math.min(distance / levelDist, 1);
-            progressFill.style.width = (prog * 100) + '%';
-
-            if (state === 'running') {
-                // Shooting
-                fireBullets(dt);
-                updateBullets(dt);
-
-                // Gate collisions
-                for (const g of gates) {
-                    if (g.passed) continue;
-                    if (g.group.position.z > -0.5 && g.group.position.z < 1) {
-                        g.passed = true;
-                        // Which side?
-                        const op = crowdX < 0 ? g.leftOp : g.rightOp;
-                        applyGate(op);
-                        // Fade out the gate
-                        g.group.visible = false;
-                    }
+            // Reached defense line?
+            if (e.position.z >= DEFENSE_Z) {
+                // Remove a squad member
+                if (squad.length > 0) {
+                    const lost = squad.pop();
+                    spawnParticles(lost.position.x, 1, lost.position.z, 0x3377DD, 8);
+                    scene.remove(lost);
+                    squadCount = Math.max(0, squadCount - 1);
+                    upgrades.squad = Math.max(0, upgrades.squad - 1);
+                    shake(0.5);
                 }
 
-                // Wall collisions (if player reaches wall that isn't smashed)
-                for (const w of walls) {
-                    if (w.smashed) continue;
-                    if (w.group.position.z > -0.5 && w.group.position.z < 1) {
-                        // Smash through — costs HP
-                        const damage = w.hp;
-                        crowdCount -= damage;
-                        w.smashed = true;
-                        smashWall(w);
+                // Remove enemy
+                scene.remove(e);
+                if (e.userData.hpSprite) scene.remove(e.userData.hpSprite);
+                enemies.splice(i, 1);
+                spawnParticles(e.position.x, 1, DEFENSE_Z, 0xff4444, 5);
 
-                        if (crowdCount <= 0) {
-                            crowdCount = 0;
-                            doGameOver();
-                            return;
-                        }
-                        updateRunners();
-                        updateHUD();
-                    }
-                }
-
-                // Boss collision
-                if (bossObj && bossHP > 0 && bossObj.position.z > -3) {
-                    state = 'smashing';
-                    battleTimer = 0;
+                if (squadCount <= 0) {
+                    doGameOver();
+                    return;
                 }
             }
         }
 
-        if (state === 'smashing' && bossObj) {
-            battleTimer += dt;
-            fireBullets(dt);
-            updateBullets(dt);
-
-            // Contact drain
-            const drain = Math.max(bossMaxHP / 3, crowdCount * 2) * dt;
-            const actual = Math.min(drain, bossHP, crowdCount);
-            bossHP -= actual;
-            crowdCount -= actual * 0.3;
-            crowdCount = Math.max(0, Math.round(crowdCount));
-            bossHP = Math.max(0, bossHP);
-
-            updateSpriteText(bossObj.userData.hpSprite, Math.ceil(bossHP).toString(), '#ffffff');
-            updateRunners();
-            updateHUD();
-
-            if (Math.random() < 0.4) {
-                const bp = bossObj.position.clone();
-                bp.x += (Math.random() - 0.5) * 6;
-                bp.y = 1 + Math.random() * 3;
-                spawnParticles(bp, 0xff6348, 2);
+        // ── Move barrels ──
+        for (let i = barrels.length - 1; i >= 0; i--) {
+            const b = barrels[i];
+            b.position.z += b.userData.speed * dt;
+            // Rotate barrel slightly
+            b.rotation.y += dt * 0.5;
+            // Glow pulse
+            if (b.userData.glow) {
+                b.userData.glow.material.opacity = 0.5 + Math.sin(time * 4) * 0.3;
             }
-            shake(0.1);
 
-            if (bossHP <= 0) defeatBoss();
-            else if (crowdCount <= 0) doGameOver();
+            // Past defense line = lost barrel
+            if (b.position.z >= DEFENSE_Z + 3) {
+                scene.remove(b);
+                barrels.splice(i, 1);
+            }
         }
 
-        // Animate runners
-        const time = Date.now() * 0.01;
-        runners.forEach(r => {
-            const spread = 1 + runners.length * 0.008;
-            r.position.x = crowdX + r.userData.baseX * spread;
-            r.position.z = r.userData.baseZ * spread * 0.5;
-            // Bouncy run
-            r.position.y = 0.7 + Math.abs(Math.sin(time * 3 + r.userData.phase)) * 0.12;
+        // ── Auto-aim & fire ──
+        const target = findNearestTarget();
+        fireCooldown -= dt;
+
+        if (target && fireCooldown <= 0) {
+            const targetPos = target.position;
+            // Each squad member fires
+            for (const s of squad) {
+                createBullet(s.position.x, s.position.z, targetPos.x, targetPos.z);
+            }
+            fireCooldown = 1 / fireRate;
+        }
+
+        // ── Move bullets ──
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const b = bullets[i];
+            b.position.add(b.userData.dir.clone().multiplyScalar(bulletSpeed * dt));
+            b.userData.life -= dt;
+
+            if (b.userData.life <= 0 || b.position.z < SPAWN_Z_MIN - 10) {
+                scene.remove(b);
+                bullets.splice(i, 1);
+                continue;
+            }
+
+            // Hit enemies
+            let hit = false;
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                const e = enemies[j];
+                if (b.position.distanceTo(e.position) < 1.2) {
+                    e.userData.hp -= b.userData.damage;
+                    SFX.hit();
+
+                    if (e.userData.hp <= 0) {
+                        // Kill enemy
+                        const reward = Math.ceil(e.userData.maxHp * 0.3 * diff.coins);
+                        coins += reward;
+                        score += e.userData.maxHp;
+                        spawnParticles(e.position.x, 1, e.position.z, 0xCC3333, 8);
+                        spawnCoinPickup(e.position.x, e.position.z, reward);
+                        SFX.enemyDie();
+                        scene.remove(e);
+                        if (e.userData.hpSprite) scene.remove(e.userData.hpSprite);
+                        enemies.splice(j, 1);
+                    } else {
+                        updateSpriteText(e.userData.hpSprite, e.userData.hp.toString(), '#ffffff');
+                    }
+
+                    scene.remove(b);
+                    bullets.splice(i, 1);
+                    hit = true;
+                    break;
+                }
+            }
+
+            if (hit) continue;
+
+            // Hit barrels
+            for (let j = barrels.length - 1; j >= 0; j--) {
+                const br = barrels[j];
+                if (b.position.distanceTo(br.position) < 1.0) {
+                    br.userData.hp -= b.userData.damage;
+                    SFX.hit();
+
+                    // Update HP label
+                    if (br.userData.hp > 0) {
+                        updateSpriteText(br.userData.hpLabel, br.userData.hp.toString(), '#ffffff');
+                    }
+
+                    if (br.userData.hp <= 0) {
+                        // Barrel destroyed — apply reward
+                        applyBarrelReward(br.userData.type, br.position.x, br.position.z);
+                        spawnParticles(br.position.x, 0.8, br.position.z, 0x8B5E3C, 12);
+                        SFX.barrelBreak();
+                        scene.remove(br);
+                        barrels.splice(j, 1);
+                        score += 10;
+                    }
+
+                    scene.remove(b);
+                    bullets.splice(i, 1);
+                    break;
+                }
+            }
+        }
+
+        // ── Animate squad ──
+        squad.forEach(s => {
+            s.position.y = 0.9 + Math.abs(Math.sin(time * 2 + s.userData.phase)) * 0.06;
+            // Face toward aim target
+            if (target) {
+                s.position.x = s.userData.baseX + Math.sin(time + s.userData.phase) * 0.1;
+            }
         });
 
-        // Update floating crowd number
-        if (crowdSprite) {
-            crowdSprite.position.x = crowdX;
-            crowdSprite.position.y = 3.5 + Math.sin(time * 0.3) * 0.15;
-            // Color timer — flash green/red then back to white
-            if (countAnim.colorTimer > 0) {
-                countAnim.colorTimer -= dt;
-                if (countAnim.colorTimer <= 0) countAnim.color = '#ffffff';
+        // ── Update particles ──
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.position.add(p.userData.vel.clone().multiplyScalar(dt));
+            p.userData.vel.y -= 15 * dt;
+            p.userData.life -= dt;
+            p.material.opacity = Math.max(0, p.userData.life);
+            if (p.userData.life <= 0) {
+                scene.remove(p);
+                particles.splice(i, 1);
             }
-            const displayCount = Math.round(crowdCount);
-            const color = countAnim.color || '#ffffff';
-            if (crowdSprite.userData.lastText !== displayCount.toString() || crowdSprite.userData.lastColor !== color) {
-                updateSpriteText(crowdSprite, displayCount.toString(), color);
-                crowdSprite.userData.lastText = displayCount.toString();
-                crowdSprite.userData.lastColor = color;
-            }
-            // Punch scale animation
-            const s = countAnim.scale * 3;
-            crowdSprite.scale.set(s * 2, s, 1);
         }
 
-        // Animate enemy units
-        enemies.forEach(eg => {
-            eg.units.forEach(u => {
-                if (u.userData.dead) return;
-                u.position.y = 0.7 + Math.abs(Math.sin(time * 3 + u.userData.phase)) * 0.1;
-            });
-        });
-
-        // Boss pulse
-        if (bossObj && bossHP > 0) {
-            const pulse = Math.sin(Date.now() * 0.005) * 0.1;
-            bossObj.scale.setScalar(1 + pulse);
+        // ── Update coin pickups ──
+        for (let i = coinPickups.length - 1; i >= 0; i--) {
+            const c = coinPickups[i];
+            c.position.y += c.userData.vy * dt;
+            c.userData.vy -= 8 * dt;
+            c.rotation.y += dt * 5;
+            c.userData.life -= dt;
+            if (c.userData.life <= 0) {
+                scene.remove(c);
+                coinPickups.splice(i, 1);
+                SFX.coin();
+            }
         }
 
-        // Particles
-        updateParticles(dt);
-
-        // Camera shake
+        // ── Camera shake ──
         if (shakeAmount > 0.01) {
             camera.position.x = (Math.random() - 0.5) * shakeAmount * 2;
-            camera.position.y = 10 + (Math.random() - 0.5) * shakeAmount;
-            shakeAmount *= 0.9;
+            camera.position.y = 18 + (Math.random() - 0.5) * shakeAmount;
+            shakeAmount *= 0.88;
         } else {
             camera.position.x = 0;
-            camera.position.y = 10;
+            camera.position.y = 18;
             shakeAmount = 0;
         }
 
-        // Number animation
-        countAnim.scale += (countAnim.targetScale - countAnim.scale) * 0.15;
+        // ── Wave progress ──
+        const killed = waveEnemiesTotal - waveEnemiesLeft - enemies.length;
+        const progress = waveEnemiesTotal > 0 ? killed / waveEnemiesTotal : 1;
+        waveBarFill.style.width = (progress * 100) + '%';
+
+        updateHUD();
+
+        // ── Check wave complete ──
+        if (waveEnemiesLeft <= 0 && enemies.length === 0) {
+            SFX.waveClear();
+            showUpgradeShop();
+        }
+    }
+
+    function applyBarrelReward(type, x, z) {
+        switch (type) {
+            case 'damage':
+                bulletDamage += 1;
+                showActionText('DMG UP!', '#ff4444');
+                break;
+            case 'fireRate':
+                fireRate = Math.min(fireRate + 0.5, 10);
+                showActionText('FIRE RATE UP!', '#44aaff');
+                break;
+            case 'squad':
+                squadCount++;
+                upgrades.squad++;
+                rebuildSquad();
+                showActionText('NEW ALLY!', '#44ff88');
+                break;
+            case 'coins':
+                const amount = Math.ceil((5 + wave * 2) * diff.coins);
+                coins += amount;
+                spawnCoinPickup(x, z, amount);
+                showActionText('+' + amount + ' COINS', '#ffdd44');
+                break;
+        }
+        shake(0.2);
+        SFX.upgrade();
+    }
+
+    // ─── Game Flow ──────────────────────────────────────────────────
+    function startGame() {
+        clearEntities();
+        state = 'playing';
+        wave = 0;
+        score = 0;
+        coins = 0;
+        squadCount = 1;
+        bulletDamage = 1;
+        fireRate = 2.5;
+        bulletSpeed = 30;
+        upgrades = { damage: 0, fireRate: 0, squad: 0, range: 0 };
+
+        startScreen.classList.add('hidden');
+        startScreen.classList.remove('active');
+        gameoverScreen.classList.add('hidden');
+        gameoverScreen.classList.remove('active');
+        waveScreen.classList.add('hidden');
+        waveScreen.classList.remove('active');
+
+        startWave();
+    }
+
+    function nextWave() {
+        clearEntities();
+        waveScreen.classList.add('hidden');
+        waveScreen.classList.remove('active');
+        startWave();
+    }
+
+    function doGameOver() {
+        state = 'gameover';
+        SFX.gameOver();
+        hudEl.style.display = 'none';
+        waveBar.style.display = 'none';
+        goTitle.textContent = 'OVERRUN';
+        goTitle.className = 'lose';
+        goWave.textContent = wave;
+        goScore.textContent = score;
+        gameoverScreen.classList.remove('hidden');
+        gameoverScreen.classList.add('active');
     }
 
     // ─── Input ──────────────────────────────────────────────────────
+    // Swipe/drag to move aim position; auto-aim to nearest target
     let dragging = false;
     let lastPointerX = 0;
 
@@ -1390,7 +1074,7 @@
         if (!dragging) return;
         const dx = x - lastPointerX;
         lastPointerX = x;
-        targetX = Math.max(-4.5, Math.min(4.5, targetX + dx * 0.03));
+        aimX = Math.max(-ARENA_WIDTH / 2, Math.min(ARENA_WIDTH / 2, aimX + dx * 0.04));
     }
     function onUp() { dragging = false; }
 
@@ -1399,46 +1083,12 @@
     document.addEventListener('mouseup', onUp);
     document.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
     document.addEventListener('touchmove', e => { e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
-    document.addEventListener('touchend', e => { e.preventDefault(); onUp(); }, { passive: false });
+    document.addEventListener('touchend', onUp);
 
     // Keyboard
     const keys = {};
-    window.addEventListener('keydown', e => { keys[e.key] = true; });
-    window.addEventListener('keyup', e => { keys[e.key] = false; });
-
-    // ─── Game Lifecycle ─────────────────────────────────────────────
-    function startLevel() {
-        state = 'running';
-        generateLevel(level);
-        initGround();
-
-        hudEl.style.display = 'flex';
-        progressEl.style.display = 'block';
-        progressFill.style.width = '0%';
-        startScreen.classList.add('hidden');
-        startScreen.classList.remove('active');
-        gameoverScreen.classList.add('hidden');
-        gameoverScreen.classList.remove('active');
-    }
-
-    function startGame() {
-        level = 1;
-        score = 0;
-        startLevel();
-    }
-
-    function doGameOver() {
-        state = 'gameover';
-        SFX.gameOver();
-        hudEl.style.display = 'none';
-        progressEl.style.display = 'none';
-        goTitle.textContent = 'GAME OVER';
-        goTitle.className = 'lose';
-        goLevel.textContent = level;
-        goScore.textContent = score;
-        gameoverScreen.classList.remove('hidden');
-        gameoverScreen.classList.add('active');
-    }
+    document.addEventListener('keydown', e => { keys[e.key] = true; });
+    document.addEventListener('keyup', e => { keys[e.key] = false; });
 
     // ─── Render Loop ────────────────────────────────────────────────
     let lastTime = 0;
@@ -1447,9 +1097,9 @@
         const dt = Math.min((timestamp - (lastTime || timestamp)) / 1000, 0.05);
         lastTime = timestamp;
 
-        // Keyboard
-        if (keys['ArrowLeft'] || keys['a'] || keys['A']) targetX = Math.max(-4.5, targetX - 0.15);
-        if (keys['ArrowRight'] || keys['d'] || keys['D']) targetX = Math.min(4.5, targetX + 0.15);
+        // Keyboard aim
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) aimX = Math.max(-ARENA_WIDTH / 2, aimX - 8 * dt);
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) aimX = Math.min(ARENA_WIDTH / 2, aimX + 8 * dt);
 
         update(dt);
         renderer.render(scene, camera);
@@ -1459,8 +1109,9 @@
     // ─── Init ───────────────────────────────────────────────────────
     document.getElementById('btn-start').addEventListener('click', startGame);
     document.getElementById('btn-retry').addEventListener('click', startGame);
+    document.getElementById('btn-next').addEventListener('click', nextWave);
 
     initRenderer();
-    initGround();
+    initArena();
     requestAnimationFrame(loop);
 })();
