@@ -14,10 +14,10 @@
         scene.background = new THREE.Color(0x1a1520);
         scene.fog = new THREE.FogExp2(0x1a1520, 0.018);
 
-        // Behind-the-player camera — lower, closer, more over-the-shoulder
-        camera = new THREE.PerspectiveCamera(55, W() / H(), 0.1, 200);
-        camera.position.set(0, 5.5, 9);
-        camera.lookAt(0, 1, -15);
+        // Behind-the-player camera — tight over-the-shoulder
+        camera = new THREE.PerspectiveCamera(60, W() / H(), 0.1, 200);
+        camera.position.set(0, 4, 7);
+        camera.lookAt(0, 1.5, -10);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(W(), H());
@@ -28,11 +28,11 @@
         renderer.toneMappingExposure = 1.1;
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
-        // Dim ambient — most light comes from fire/muzzle
-        scene.add(new THREE.AmbientLight(0x334455, 0.35));
+        // Ambient — enough to see the action
+        scene.add(new THREE.AmbientLight(0x556677, 0.6));
 
-        // Main directional (moonlight feel)
-        const sun = new THREE.DirectionalLight(0x8899bb, 0.4);
+        // Main directional
+        const sun = new THREE.DirectionalLight(0xccbbaa, 0.5);
         sun.position.set(5, 20, 10);
         sun.castShadow = true;
         sun.shadow.camera.left = -20;
@@ -190,7 +190,7 @@
     let spawnTimer = 0, barrelTimer = 0;
     let muzzleFlashes = [];
 
-    const ROAD_W = 8;
+    const ROAD_W = 10;
     const DEFENSE_Z = 2;
     const SPAWN_Z_MIN = -55;
     const SPAWN_Z_MAX = -25;
@@ -229,26 +229,25 @@
             }
         }
 
-        // Side walls (thicker, taller — industrial corridor)
+        // Side walls — low, dark, unobtrusive
         for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(1.0, 4.5, 100),
-                new THREE.MeshStandardMaterial({ color: 0x3a3a44, roughness: 0.85 }));
-            wall.position.set(side * (ROAD_W / 2 + 0.5), 2.25, -25);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 100),
+                new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.95 }));
+            wall.position.set(side * (ROAD_W / 2 + 0.3), 0.75, -25);
             wall.castShadow = true;
             scene.add(wall); envMeshes.push(wall);
 
             // Wall cap / ledge
-            const cap = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.2, 100),
-                new THREE.MeshStandardMaterial({ color: 0x555566 }));
-            cap.position.set(side * (ROAD_W / 2 + 0.5), 4.5, -25);
+            const cap = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, 100),
+                new THREE.MeshStandardMaterial({ color: 0x3a3a44 }));
+            cap.position.set(side * (ROAD_W / 2 + 0.3), 1.5, -25);
             scene.add(cap); envMeshes.push(cap);
 
-            // Wall buttresses every 8 units
-            for (let z = 0; z > -60; z -= 8) {
-                const buttress = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.5, 0.8),
-                    new THREE.MeshStandardMaterial({ color: 0x444450 }));
-                buttress.position.set(side * (ROAD_W / 2 + 0.05), 2.25, z);
-                buttress.castShadow = true;
+            // Buttresses every 10 units
+            for (let z = 0; z > -60; z -= 10) {
+                const buttress = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.5, 0.6),
+                    new THREE.MeshStandardMaterial({ color: 0x333340 }));
+                buttress.position.set(side * (ROAD_W / 2 + 0.05), 0.75, z);
                 scene.add(buttress); envMeshes.push(buttress);
             }
         }
@@ -533,7 +532,7 @@
         soldier.add(weapon);
 
         soldier.position.set(aimX + ox, 0, DEFENSE_Z + 1);
-        soldier.scale.setScalar(1.4); // bigger, more visible from behind
+        soldier.scale.setScalar(1.8); // big, clearly visible from behind
         soldier.userData.offsetX = ox;
         soldier.userData.weapon = weapon;
         soldier.userData.phase = Math.random() * Math.PI * 2;
@@ -1078,10 +1077,10 @@
         // Camera shake
         if (shakeAmount > 0.01) {
             camera.position.x = (Math.random()-0.5) * shakeAmount * 2;
-            camera.position.y = 5.5 + (Math.random()-0.5) * shakeAmount;
+            camera.position.y = 4 + (Math.random()-0.5) * shakeAmount;
             shakeAmount *= 0.88;
         } else {
-            camera.position.x = 0; camera.position.y = 5.5; shakeAmount = 0;
+            camera.position.x = 0; camera.position.y = 4; shakeAmount = 0;
         }
 
         // Wave progress
