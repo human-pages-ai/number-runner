@@ -419,7 +419,7 @@
         const sprite = createCharSprite(x, z, 'viking');
         sprite.userData.hp = hp;
         sprite.userData.maxHp = hp;
-        sprite.userData.speed = diff.enemySpeed * (0.8 + Math.random() * 0.4);
+        sprite.userData.speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.05);
         sprite.userData.wobble = Math.random() * Math.PI * 2;
 
         // HP label
@@ -594,8 +594,9 @@
     // ─── Wave System ────────────────────────────────────────────────
     function startWave() {
         wave++;
-        const enemyCount = Math.floor((5 + wave * 3) * diff.spawnRate);
-        const barrelCount = Math.floor((2 + wave * 0.8) * diff.barrelRate);
+        // Exponential enemy scaling — upgrades feel earned but pressure mounts
+        const enemyCount = Math.floor((5 + wave * 4 + wave * wave * 0.8) * diff.spawnRate);
+        const barrelCount = Math.floor((2 + Math.min(wave * 0.6, 5)) * diff.barrelRate);
         waveEnemiesLeft = enemyCount;
         waveEnemiesTotal = enemyCount;
         waveBarrelsLeft = barrelCount;
@@ -701,11 +702,12 @@
         const time = Date.now() * 0.001;
 
         // ── Spawn enemies ──
-        const spawnInterval = Math.max(0.4, 2.5 - wave * 0.12) / diff.spawnRate;
+        // Spawn faster as waves progress, enemies get tankier
+        const spawnInterval = Math.max(0.25, 2.0 - wave * 0.15) / diff.spawnRate;
         spawnTimer += dt;
         if (waveEnemiesLeft > 0 && spawnTimer >= spawnInterval) {
             spawnTimer = 0;
-            const hp = Math.ceil((2 + wave * 1.5 + Math.random() * wave) * diff.enemyHP);
+            const hp = Math.ceil((2 + wave * 2 + wave * wave * 0.3 + Math.random() * wave) * diff.enemyHP);
             const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
             spawnEnemy(z, hp);
             waveEnemiesLeft--;
