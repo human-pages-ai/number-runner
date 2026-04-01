@@ -136,16 +136,19 @@
         ground: new THREE.MeshStandardMaterial({ color: 0x7ec850 }),
         track: new THREE.MeshStandardMaterial({ color: 0xaaaaaa }),
         trackLine: new THREE.MeshStandardMaterial({ color: 0xcccccc }),
-        bullet: new THREE.MeshBasicMaterial({ color: 0xfeca57 }),
+        bullet: new THREE.MeshBasicMaterial({ color: 0xffee44 }),
+        bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 }),
+        bulletTrail: new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.4 }),
         pillar: new THREE.MeshStandardMaterial({ color: 0x888888 }),
     };
 
     // ─── Geometries (reusable) ──────────────────────────────────────
     const GEO = {
-        body: new THREE.CylinderGeometry(0.2, 0.25, 0.7, 6),
-        head: new THREE.SphereGeometry(0.18, 6, 6),
-        gun: new THREE.BoxGeometry(0.08, 0.08, 0.35),
-        bullet: new THREE.SphereGeometry(0.06, 4, 4),
+        body: new THREE.CylinderGeometry(0.25, 0.3, 0.8, 6),
+        head: new THREE.SphereGeometry(0.22, 8, 8),
+        gun: new THREE.BoxGeometry(0.1, 0.1, 0.4),
+        bullet: new THREE.SphereGeometry(0.15, 6, 6),
+        bulletTrail: new THREE.CylinderGeometry(0.05, 0.08, 0.6, 4),
         wallBlock: new THREE.BoxGeometry(1, 1, 1),
         gateFrame: new THREE.BoxGeometry(5, 3.5, 0.25),
         pillar: new THREE.CylinderGeometry(0.15, 0.15, 4, 6),
@@ -200,8 +203,8 @@
     function generateLevel(lvl) {
         clearLevel();
 
-        speed = 0.3 + lvl * 0.015;
-        crowdCount = 2 + Math.floor(lvl / 2);
+        speed = 0.38 + lvl * 0.025;
+        crowdCount = 2 + Math.floor(lvl / 3);
         crowdX = 0;
         targetX = 0;
         distance = 0;
@@ -209,8 +212,8 @@
         timescale = 1;
         timescaleTarget = 1;
 
-        const segments = 6 + Math.floor(lvl * 1.2);
-        let z = -25;
+        const segments = 7 + Math.floor(lvl * 1.5);
+        let z = -20;
 
         for (let i = 0; i < segments; i++) {
             if (i % 2 === 0) {
@@ -219,7 +222,7 @@
                 gates.push(pair);
             } else {
                 // Wall with enemies
-                const hp = Math.floor((6 + lvl * 4) * (0.7 + Math.random() * 0.6));
+                const hp = Math.floor((10 + lvl * 6) * (0.7 + Math.random() * 0.6));
                 const wall = createWall(z, hp);
                 walls.push(wall);
 
@@ -232,7 +235,7 @@
         }
 
         // Boss
-        bossMaxHP = Math.floor(25 + lvl * 18 + lvl * lvl * 1.5);
+        bossMaxHP = Math.floor(40 + lvl * 25 + lvl * lvl * 2);
         bossHP = bossMaxHP;
         bossObj = createBoss(z - 15);
 
@@ -602,9 +605,28 @@
             const r = runners[Math.floor(Math.random() * runners.length)];
             if (!r) continue;
 
-            const bullet = new THREE.Mesh(GEO.bullet, MAT.bullet);
-            bullet.position.copy(r.position);
-            bullet.position.y += 0.8;
+            // Bullet group: bright core + glow halo + trail
+            const bulletGroup = new THREE.Group();
+
+            // Core (bright yellow)
+            const core = new THREE.Mesh(GEO.bullet, MAT.bullet);
+            bulletGroup.add(core);
+
+            // Glow halo (larger, transparent)
+            const glow = new THREE.Mesh(
+                new THREE.SphereGeometry(0.3, 6, 6),
+                MAT.bulletGlow
+            );
+            bulletGroup.add(glow);
+
+            // Trail cylinder
+            const trail = new THREE.Mesh(GEO.bulletTrail, MAT.bulletTrail);
+            trail.rotation.x = Math.PI / 2;
+            trail.position.z = 0.35;
+            bulletGroup.add(trail);
+
+            bulletGroup.position.copy(r.position);
+            bulletGroup.position.y += 0.8;
 
             let targetPos;
             if (target.type === 'enemy') {
@@ -623,15 +645,18 @@
                 targetPos.x += (Math.random() - 0.5) * 4;
             }
 
-            const dir = targetPos.sub(bullet.position).normalize();
-            bullet.userData = {
-                vel: dir.multiplyScalar(50),
-                life: 1.5,
+            const dir = targetPos.sub(bulletGroup.position).normalize();
+            // Orient bullet toward target
+            bulletGroup.lookAt(bulletGroup.position.clone().add(dir));
+
+            bulletGroup.userData = {
+                vel: dir.multiplyScalar(40),
+                life: 2.0,
                 target: target.type,
             };
 
-            scene.add(bullet);
-            bullets3d.push(bullet);
+            scene.add(bulletGroup);
+            bullets3d.push(bulletGroup);
 
             if (Math.random() < 0.3) SFX.shoot();
         }
@@ -642,6 +667,12 @@
             const b = bullets3d[i];
             b.position.add(b.userData.vel.clone().multiplyScalar(dt));
             b.userData.life -= dt;
+
+            // Pulse the glow
+            if (b.children && b.children[1]) {
+                const s = 0.8 + Math.sin(Date.now() * 0.03 + i) * 0.3;
+                b.children[1].scale.setScalar(s);
+            }
 
             if (b.userData.life <= 0) {
                 scene.remove(b);
@@ -679,6 +710,77 @@
                     }
                 }
                 if (hit) break;
+            }
+
+            // Check gate hits — shooting gates changes their values!
+            if (!hit) {
+                for (const g of gates) {
+                    if (g.passed) continue;
+                    const gp = g.group.position;
+                    if (Math.abs(b.position.z - gp.z) < 0.8 && b.position.y < 4.5) {
+                        // Which gate did we hit? Left (x < 0) or right (x > 0)?
+                        const bx = b.position.x;
+                        let hitOp = null;
+                        let side = null;
+                        if (bx < 0 && bx > -5.5) { hitOp = g.leftOp; side = 'left'; }
+                        else if (bx > 0 && bx < 5.5) { hitOp = g.rightOp; side = 'right'; }
+
+                        if (hitOp) {
+                            const isGood = hitOp.op === '+' || hitOp.op === 'x';
+                            if (isGood) {
+                                // Shooting good gates increases their value
+                                if (hitOp.op === '+') {
+                                    hitOp.val += 1;
+                                    hitOp.label = '+' + hitOp.val;
+                                } else if (hitOp.op === 'x') {
+                                    // Small chance to increment multiplier
+                                    if (Math.random() < 0.15) {
+                                        hitOp.val = Math.min(hitOp.val + 1, 5);
+                                        hitOp.label = '×' + hitOp.val;
+                                    }
+                                }
+                                spawnParticles(b.position, 0x00ff88, 4);
+                            } else {
+                                // Shooting bad gates reduces their penalty
+                                if (hitOp.op === '-') {
+                                    hitOp.val = Math.max(0, hitOp.val - 1);
+                                    hitOp.label = hitOp.val === 0 ? '±0' : '-' + hitOp.val;
+                                } else if (hitOp.op === '/') {
+                                    // Chance to neutralize divide
+                                    if (Math.random() < 0.2) {
+                                        hitOp.op = '+'; hitOp.val = 1; hitOp.label = '+1';
+                                    }
+                                }
+                                spawnParticles(b.position, 0xff8844, 4);
+                            }
+
+                            // Update the gate's text visually
+                            const gateGroup = side === 'left' ? g.group.children[0] : g.group.children[1];
+                            if (gateGroup) {
+                                // Find the text mesh (PlaneGeometry child)
+                                gateGroup.traverse(child => {
+                                    if (child.material && child.material.map) {
+                                        const c = child.material.map.image.getContext('2d');
+                                        const isG = hitOp.op === '+' || hitOp.op === 'x';
+                                        const isGr = hitOp.op === 'x' && hitOp.val >= 3;
+                                        c.clearRect(0, 0, 256, 128);
+                                        c.fillStyle = isGr ? '#7c3aed' : isG ? '#00aa44' : '#cc3333';
+                                        c.fillRect(0, 0, 256, 128);
+                                        c.fillStyle = '#ffffff';
+                                        c.font = 'bold 80px system-ui';
+                                        c.textAlign = 'center';
+                                        c.textBaseline = 'middle';
+                                        c.fillText(hitOp.label, 128, 64);
+                                        child.material.map.needsUpdate = true;
+                                    }
+                                });
+                            }
+
+                            hit = true;
+                            break;
+                        }
+                    }
+                }
             }
 
             // Check wall hits
