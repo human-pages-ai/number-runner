@@ -179,11 +179,11 @@
     let weaponLevel = 0;  // 0=pistol, 1=smg, 2=shotgun, 3=machinegun, 4=minigun
 
     const WEAPONS = [
-        { name: 'Pistol',      damage: 1, fireRate: 2.5, bullets: 1, spread: 0, color: 0xffee44 },
-        { name: 'SMG',         damage: 1, fireRate: 5,   bullets: 1, spread: 0.3, color: 0xffaa22 },
-        { name: 'Shotgun',     damage: 2, fireRate: 1.8, bullets: 5, spread: 1.5, color: 0xff6622 },
-        { name: 'Machine Gun', damage: 2, fireRate: 8,   bullets: 1, spread: 0.2, color: 0xff4400 },
-        { name: 'Minigun',     damage: 3, fireRate: 12,  bullets: 2, spread: 0.5, color: 0xff2200 },
+        { name: 'Pistol',      damage: 1, fireRate: 2.5, bullets: 1, spread: 0, color: 0xffee44, size: 0.10 },
+        { name: 'SMG',         damage: 1, fireRate: 5,   bullets: 1, spread: 0, color: 0xffaa22, size: 0.12 },
+        { name: 'Shotgun',     damage: 3, fireRate: 1.8, bullets: 1, spread: 0, color: 0xff6622, size: 0.18 },
+        { name: 'Machine Gun', damage: 2, fireRate: 8,   bullets: 1, spread: 0, color: 0xff4400, size: 0.14 },
+        { name: 'Minigun',     damage: 4, fireRate: 12,  bullets: 1, spread: 0, color: 0xff2200, size: 0.16 },
     ];
 
     // Upgrades
@@ -411,12 +411,98 @@
         return sprite;
     }
 
+    // Weapon meshes — visible 3D guns held by squad members
+    const WEAPON_GEO = [
+        // Pistol — small box
+        () => {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.3), MAT.gun));
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.2, 4), MAT.gun);
+            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.22);
+            g.add(barrel);
+            return g;
+        },
+        // SMG — longer body
+        () => {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.45), MAT.gun));
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25, 4), MAT.gun);
+            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.03, -0.32);
+            g.add(barrel);
+            const mag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.06), MAT.gun);
+            mag.position.set(0, -0.12, 0.05);
+            g.add(mag);
+            return g;
+        },
+        // Shotgun — wide barrel, pump grip
+        () => {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.55), MAT.gun));
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 6), MAT.gun);
+            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.03, -0.38);
+            g.add(barrel);
+            const pump = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.12),
+                new THREE.MeshStandardMaterial({ color: 0x8B5E3C }));
+            pump.position.set(0, -0.06, -0.1);
+            g.add(pump);
+            return g;
+        },
+        // Machine Gun — long with bipod
+        () => {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.65), MAT.gun));
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.35, 6), MAT.gun);
+            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.03, -0.46);
+            g.add(barrel);
+            const box = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.14),
+                new THREE.MeshStandardMaterial({ color: 0x556633 }));
+            box.position.set(0, -0.1, 0.15);
+            g.add(box);
+            return g;
+        },
+        // Minigun — multi-barrel beast
+        () => {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.5), MAT.gun));
+            for (let i = 0; i < 4; i++) {
+                const angle = (i / 4) * Math.PI * 2;
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 4), MAT.gun);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(Math.cos(angle) * 0.05, Math.sin(angle) * 0.05 + 0.02, -0.42);
+                g.add(barrel);
+            }
+            const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.14, 8),
+                new THREE.MeshStandardMaterial({ color: 0x556633 }));
+            drum.position.set(0, -0.12, 0.1);
+            g.add(drum);
+            return g;
+        },
+    ];
+
     function createSquadMember(index) {
         const spread = Math.min(squadCount - 1, 5) * 0.8;
         const offsetX = squadCount === 1 ? 0 : -spread / 2 + (index / Math.max(1, squadCount - 1)) * spread;
-        const sprite = createCharSprite(aimX + offsetX, DEFENSE_Z + 2, 'warrior');
-        sprite.userData = { index, offsetX, phase: Math.random() * Math.PI * 2 };
-        return sprite;
+
+        const group = new THREE.Group();
+        group.position.set(aimX + offsetX, 0, DEFENSE_Z + 2);
+
+        // Character sprite
+        const variant = Math.floor(Math.random() * 4);
+        const tex = getCharTexture('warrior', variant);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const charSprite = new THREE.Sprite(mat);
+        charSprite.scale.set(1.8, 1.8, 1);
+        charSprite.position.y = 0.9;
+        group.add(charSprite);
+
+        // Weapon mesh
+        const weapon = WEAPON_GEO[weaponLevel]();
+        weapon.position.set(0.4, 0.55, -0.3);
+        group.add(weapon);
+
+        group.userData = { index, offsetX, phase: Math.random() * Math.PI * 2, weapon };
+        scene.add(group);
+        return group;
     }
 
     function rebuildSquad() {
@@ -457,12 +543,7 @@
         const speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.05);
         const wobble = Math.random() * Math.PI * 2;
 
-        // Count label above horde
-        const countSprite = createTextSprite(hp.toString(), '#ff6666', 0.8);
-        countSprite.position.set(0, 2.5, 0);
-        group.add(countSprite);
-
-        group.userData = { hp, maxHp: hp, speed, wobble, vikings, countSprite };
+        group.userData = { hp, maxHp: hp, speed, wobble, vikings };
         scene.add(group);
         enemies.push(group);
     }
@@ -559,11 +640,7 @@
     }
 
     function fireWeapon(fromX, fromZ) {
-        const w = WEAPONS[weaponLevel];
-        for (let i = 0; i < w.bullets; i++) {
-            const spread = (Math.random() - 0.5) * w.spread;
-            createBullet(fromX, fromZ, spread);
-        }
+        createBullet(fromX, fromZ);
         SFX.shoot();
     }
 
@@ -897,9 +974,6 @@
                         SFX.enemyDie();
                         scene.remove(e);
                         enemies.splice(j, 1);
-                    } else {
-                        // Update count label
-                        updateSpriteText(e.userData.countSprite, e.userData.hp.toString(), '#ff6666');
                     }
 
                     scene.remove(b);
@@ -945,7 +1019,8 @@
         // ── Animate squad (follows aimX) ──
         squad.forEach(s => {
             s.position.x = aimX + s.userData.offsetX;
-            s.position.y = 0.9 + Math.abs(Math.sin(time * 2 + s.userData.phase)) * 0.06;
+            // Bounce
+            s.children[0].position.y = 0.9 + Math.abs(Math.sin(time * 2 + s.userData.phase)) * 0.06;
         });
 
         // ── Update particles ──
@@ -1012,6 +1087,7 @@
                 if (weaponLevel < WEAPONS.length - 1) {
                     weaponLevel++;
                     applyWeapon();
+                    rebuildSquad();
                     showActionText(WEAPONS[weaponLevel].name.toUpperCase() + '!', '#ff4444');
                 } else {
                     // Already maxed — give coins instead
