@@ -176,13 +176,22 @@
     let fireRate = 2.5;   // shots per second per shooter
     let bulletDamage = 1;
     let bulletSpeed = 30;
+    let weaponLevel = 0;  // 0=pistol, 1=smg, 2=shotgun, 3=machinegun, 4=minigun
+
+    const WEAPONS = [
+        { name: 'Pistol',      damage: 1, fireRate: 2.5, bullets: 1, spread: 0, color: 0xffee44 },
+        { name: 'SMG',         damage: 1, fireRate: 5,   bullets: 1, spread: 0.3, color: 0xffaa22 },
+        { name: 'Shotgun',     damage: 2, fireRate: 1.8, bullets: 5, spread: 1.5, color: 0xff6622 },
+        { name: 'Machine Gun', damage: 2, fireRate: 8,   bullets: 1, spread: 0.2, color: 0xff4400 },
+        { name: 'Minigun',     damage: 3, fireRate: 12,  bullets: 2, spread: 0.5, color: 0xff2200 },
+    ];
 
     // Upgrades
     let upgrades = {
-        damage: 0,    // +1 damage per level
-        fireRate: 0,  // +0.5 fire rate per level
-        squad: 0,     // +1 squad member per level
-        range: 0,     // not used yet, placeholder
+        damage: 0,
+        fireRate: 0,
+        squad: 0,
+        range: 0,
     };
 
     // Entities
@@ -419,20 +428,43 @@
     }
 
     function spawnEnemy(z, hp) {
-        const x = (Math.random() - 0.5) * (ARENA_WIDTH - 2);
-        const sprite = createCharSprite(x, z, 'viking');
-        sprite.userData.hp = hp;
-        sprite.userData.maxHp = hp;
-        sprite.userData.speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.05);
-        sprite.userData.wobble = Math.random() * Math.PI * 2;
+        // Each "enemy" is a horde of individual vikings — hp = viking count
+        const centerX = (Math.random() - 0.5) * (ARENA_WIDTH - 2);
+        const group = new THREE.Group();
+        group.position.set(centerX, 0, z);
 
-        // HP label
-        const hpSprite = createTextSprite(hp.toString(), '#ffffff', 0.7);
-        hpSprite.position.set(x, 2.2, z);
-        scene.add(hpSprite);
-        sprite.userData.hpSprite = hpSprite;
+        const count = Math.min(hp, 30); // cap visual sprites for performance
+        const vikings = [];
+        const spread = Math.min(1.5, 0.3 + count * 0.08);
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.sqrt(Math.random()) * spread;
+            const vx = Math.cos(angle) * radius;
+            const vz = Math.sin(angle) * radius;
+            const variant = Math.floor(Math.random() * 4);
+            const tex = getCharTexture('viking', variant);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(1.4, 1.4, 1);
+            sprite.position.set(vx, 0.9, vz);
+            sprite.userData.phase = Math.random() * Math.PI * 2;
+            sprite.userData.localX = vx;
+            sprite.userData.localZ = vz;
+            group.add(sprite);
+            vikings.push(sprite);
+        }
 
-        enemies.push(sprite);
+        const speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.05);
+        const wobble = Math.random() * Math.PI * 2;
+
+        // Count label above horde
+        const countSprite = createTextSprite(hp.toString(), '#ff6666', 0.8);
+        countSprite.position.set(0, 2.5, 0);
+        group.add(countSprite);
+
+        group.userData = { hp, maxHp: hp, speed, wobble, vikings, countSprite };
+        scene.add(group);
+        enemies.push(group);
     }
 
     function spawnBarrel(z) {
@@ -460,9 +492,9 @@
             group.add(ring);
         }
 
-        // Determine barrel type
-        const types = ['damage', 'fireRate', 'squad', 'coins'];
-        const weights = [3, 3, 1, 4];
+        // Determine barrel type — allies and weapons are the exciting ones
+        const types = ['squad', 'weapon', 'coins', 'squad'];
+        const weights = [4, 3, 3, 3];
         let total = weights.reduce((a, b) => a + b);
         let r = Math.random() * total;
         let type = types[0];
@@ -471,9 +503,10 @@
             if (r <= 0) { type = types[i]; break; }
         }
 
-        const hp = Math.ceil((3 + wave * 1.5) * diff.enemyHP);
-        const colors = { damage: '#ff4444', fireRate: '#44aaff', squad: '#44ff88', coins: '#ffdd44' };
-        const labels = { damage: 'DMG+', fireRate: 'FIRE+', squad: 'ALLY+', coins: 'COINS' };
+        const hp = Math.ceil((2 + wave * 1.0) * diff.enemyHP);
+        const colors = { squad: '#44ff88', weapon: '#ff4444', coins: '#ffdd44' };
+        const nextWeapon = weaponLevel < WEAPONS.length - 1 ? WEAPONS[weaponLevel + 1].name : 'MAX';
+        const labels = { squad: 'ALLY+', weapon: nextWeapon, coins: 'COINS' };
 
         // Glow top
         const glow = new THREE.Mesh(
@@ -498,29 +531,39 @@
         barrels.push(group);
     }
 
-    function createBullet(fromX, fromZ) {
-        // Always shoot straight forward (negative Z)
-        const dir = new THREE.Vector3(0, 0, -1);
+    function createBullet(fromX, fromZ, spreadX) {
+        const sx = spreadX || 0;
+        const dir = new THREE.Vector3(sx, 0, -1).normalize();
+
+        const w = WEAPONS[weaponLevel];
+        const bColor = w.color;
 
         const group = new THREE.Group();
         group.position.set(fromX, 1, fromZ);
 
         const core = new THREE.Mesh(
             new THREE.SphereGeometry(0.12, 6, 6),
-            MAT.bullet
+            new THREE.MeshBasicMaterial({ color: bColor })
         );
         group.add(core);
 
         const glow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.25, 6, 6),
-            MAT.bulletGlow
+            new THREE.SphereGeometry(0.22, 6, 6),
+            new THREE.MeshBasicMaterial({ color: bColor, transparent: true, opacity: 0.4 })
         );
         group.add(glow);
 
         group.userData = { dir, damage: bulletDamage, life: 2.5 };
         scene.add(group);
         bullets.push(group);
+    }
 
+    function fireWeapon(fromX, fromZ) {
+        const w = WEAPONS[weaponLevel];
+        for (let i = 0; i < w.bullets; i++) {
+            const spread = (Math.random() - 0.5) * w.spread;
+            createBullet(fromX, fromZ, spread);
+        }
         SFX.shoot();
     }
 
@@ -599,7 +642,8 @@
     function startWave() {
         wave++;
         // Exponential enemy scaling, amplified by adaptive pressure
-        const baseCount = 5 + wave * 4 + wave * wave * 0.8;
+        // More hordes since each is smaller (individual vikings)
+        const baseCount = 8 + wave * 5 + wave * wave * 1.0;
         const enemyCount = Math.floor(baseCount * diff.spawnRate * pressure);
         const barrelCount = Math.floor((2 + Math.min(wave * 0.6, 5)) * diff.barrelRate);
         waveEnemiesLeft = enemyCount;
@@ -619,7 +663,7 @@
     }
 
     function clearEntities() {
-        enemies.forEach(e => { scene.remove(e); if (e.userData.hpSprite) scene.remove(e.userData.hpSprite); });
+        enemies.forEach(e => scene.remove(e));
         barrels.forEach(b => scene.remove(b));
         bullets.forEach(b => scene.remove(b));
         particles.forEach(p => scene.remove(p));
@@ -631,23 +675,16 @@
     // ─── Upgrades ───────────────────────────────────────────────────
     const UPGRADE_DEFS = [
         {
-            id: 'damage', name: 'Bullet Damage',
-            maxLevel: 10,
-            cost: lvl => 5 + lvl * 5,
-            apply: lvl => { bulletDamage = 1 + lvl; },
-            desc: lvl => `DMG ${1 + lvl} → ${2 + lvl}`,
-        },
-        {
-            id: 'fireRate', name: 'Fire Rate',
-            maxLevel: 8,
-            cost: lvl => 8 + lvl * 6,
-            apply: lvl => { fireRate = 2.5 + lvl * 0.8; },
-            desc: lvl => `${(2.5 + lvl * 0.8).toFixed(1)} → ${(2.5 + (lvl + 1) * 0.8).toFixed(1)}/s`,
+            id: 'weapon', name: 'Weapon Upgrade',
+            maxLevel: WEAPONS.length - 1,
+            cost: lvl => 10 + lvl * 15,
+            apply: lvl => { weaponLevel = lvl; applyWeapon(); },
+            desc: lvl => `${WEAPONS[lvl].name} → ${WEAPONS[lvl + 1].name}`,
         },
         {
             id: 'squad', name: 'Extra Shooter',
-            maxLevel: 5,
-            cost: lvl => 15 + lvl * 12,
+            maxLevel: 8,
+            cost: lvl => 8 + lvl * 8,
             apply: lvl => { squadCount = 1 + lvl; },
             desc: lvl => `${1 + lvl} → ${2 + lvl} shooters`,
         },
@@ -710,10 +747,13 @@
         setTimeout(() => actionText.classList.remove('show'), 1200);
     }
 
+    const weaponDisplay = document.getElementById('weapon-display');
+
     function updateHUD() {
         waveDisplay.textContent = wave;
         squadDisplay.textContent = squadCount;
         coinDisplay.textContent = coins;
+        weaponDisplay.textContent = WEAPONS[weaponLevel].name;
     }
 
     // ─── Main Update ────────────────────────────────────────────────
@@ -727,7 +767,8 @@
         spawnTimer += dt;
         if (waveEnemiesLeft > 0 && spawnTimer >= spawnInterval) {
             spawnTimer = 0;
-            const hp = Math.ceil((2 + wave * 2 + wave * wave * 0.3 + Math.random() * wave) * diff.enemyHP * (0.7 + pressure * 0.3));
+            // HP = number of visible vikings in the horde
+            const hp = Math.ceil((1 + wave * 0.8 + Math.random() * wave * 0.5) * diff.enemyHP * (0.7 + pressure * 0.3));
             const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
             spawnEnemy(z, hp);
             waveEnemiesLeft--;
@@ -743,38 +784,37 @@
             waveBarrelsLeft--;
         }
 
-        // ── Move enemies toward defense line ──
+        // ── Move enemy hordes toward defense line ──
         for (let i = enemies.length - 1; i >= 0; i--) {
             const e = enemies[i];
             // Slow steady march + wobble
             e.position.z += e.userData.speed * dt;
             e.position.x += Math.sin(time * 2 + e.userData.wobble) * 0.3 * dt;
-            e.position.x = Math.max(-ARENA_WIDTH / 2 + 0.5, Math.min(ARENA_WIDTH / 2 - 0.5, e.position.x));
-            e.position.y = 0.9 + Math.abs(Math.sin(time * 3 + e.userData.wobble)) * 0.1;
+            e.position.x = Math.max(-ARENA_WIDTH / 2 + 1, Math.min(ARENA_WIDTH / 2 - 1, e.position.x));
 
-            // Update HP sprite position
-            if (e.userData.hpSprite) {
-                e.userData.hpSprite.position.copy(e.position);
-                e.userData.hpSprite.position.y += 1.3;
+            // Animate individual vikings in the horde
+            for (const v of e.userData.vikings) {
+                v.position.y = 0.9 + Math.abs(Math.sin(time * 3 + v.userData.phase)) * 0.12;
+                v.position.x = v.userData.localX + Math.sin(time * 1.5 + v.userData.phase) * 0.1;
             }
 
             // Reached defense line?
             if (e.position.z >= DEFENSE_Z) {
-                // Remove a squad member
-                if (squad.length > 0) {
+                // Each surviving viking in the horde kills a squad member
+                const remaining = e.userData.hp;
+                for (let k = 0; k < remaining && squad.length > 0; k++) {
                     const lost = squad.pop();
-                    spawnParticles(lost.position.x, 1, lost.position.z, 0x3377DD, 8);
+                    spawnParticles(lost.position.x, 1, lost.position.z, 0x3377DD, 6);
                     scene.remove(lost);
                     squadCount = Math.max(0, squadCount - 1);
                     upgrades.squad = Math.max(0, upgrades.squad - 1);
-                    shake(0.5);
                 }
+                shake(0.6);
 
-                // Remove enemy
+                // Remove enemy horde
                 scene.remove(e);
-                if (e.userData.hpSprite) scene.remove(e.userData.hpSprite);
                 enemies.splice(i, 1);
-                spawnParticles(e.position.x, 1, DEFENSE_Z, 0xff4444, 5);
+                spawnParticles(e.position.x, 1, DEFENSE_Z, 0xff4444, 8);
 
                 if (squadCount <= 0) {
                     doGameOver();
@@ -805,9 +845,9 @@
         fireCooldown -= dt;
 
         if (fireCooldown <= 0 && (enemies.length > 0 || barrels.length > 0)) {
-            // Each squad member fires straight forward
+            // Each squad member fires their weapon
             for (const s of squad) {
-                createBullet(s.position.x, s.position.z);
+                fireWeapon(s.position.x, s.position.z);
             }
             fireCooldown = 1 / fireRate;
         }
@@ -824,29 +864,42 @@
                 continue;
             }
 
-            // Hit enemies (check if bullet is close in X and Z)
+            // Hit enemy hordes (check against horde group position + spread)
             let hit = false;
             for (let j = enemies.length - 1; j >= 0; j--) {
                 const e = enemies[j];
                 const dx = Math.abs(b.position.x - e.position.x);
                 const dz = Math.abs(b.position.z - e.position.z);
-                if (dx < 0.9 && dz < 0.9) {
-                    e.userData.hp -= b.userData.damage;
+                const hitRadius = 0.8 + e.userData.vikings.length * 0.05;
+                if (dx < hitRadius && dz < hitRadius) {
+                    // Kill individual vikings
+                    const kills = Math.min(b.userData.damage, e.userData.hp);
+                    e.userData.hp -= kills;
                     SFX.hit();
 
+                    // Remove viking sprites from the horde
+                    for (let k = 0; k < kills && e.userData.vikings.length > 0; k++) {
+                        const dead = e.userData.vikings.pop();
+                        spawnParticles(
+                            e.position.x + dead.position.x, 1,
+                            e.position.z + dead.position.z,
+                            0xCC3333, 3
+                        );
+                        e.remove(dead);
+                    }
+
                     if (e.userData.hp <= 0) {
-                        // Kill enemy
+                        // Entire horde wiped out
                         const reward = Math.ceil(e.userData.maxHp * 0.3 * diff.coins);
                         coins += reward;
                         score += e.userData.maxHp;
-                        spawnParticles(e.position.x, 1, e.position.z, 0xCC3333, 8);
                         spawnCoinPickup(e.position.x, e.position.z, reward);
                         SFX.enemyDie();
                         scene.remove(e);
-                        if (e.userData.hpSprite) scene.remove(e.userData.hpSprite);
                         enemies.splice(j, 1);
                     } else {
-                        updateSpriteText(e.userData.hpSprite, e.userData.hp.toString(), '#ffffff');
+                        // Update count label
+                        updateSpriteText(e.userData.countSprite, e.userData.hp.toString(), '#ff6666');
                     }
 
                     scene.remove(b);
@@ -947,21 +1000,32 @@
         }
     }
 
+    function applyWeapon() {
+        const w = WEAPONS[weaponLevel];
+        bulletDamage = w.damage;
+        fireRate = w.fireRate;
+    }
+
     function applyBarrelReward(type, x, z) {
         switch (type) {
-            case 'damage':
-                bulletDamage += 1;
-                showActionText('DMG UP!', '#ff4444');
-                break;
-            case 'fireRate':
-                fireRate = Math.min(fireRate + 0.5, 10);
-                showActionText('FIRE RATE UP!', '#44aaff');
+            case 'weapon':
+                if (weaponLevel < WEAPONS.length - 1) {
+                    weaponLevel++;
+                    applyWeapon();
+                    showActionText(WEAPONS[weaponLevel].name.toUpperCase() + '!', '#ff4444');
+                } else {
+                    // Already maxed — give coins instead
+                    const amt = Math.ceil((8 + wave * 3) * diff.coins);
+                    coins += amt;
+                    spawnCoinPickup(x, z, amt);
+                    showActionText('+' + amt + ' COINS', '#ffdd44');
+                }
                 break;
             case 'squad':
                 squadCount++;
                 upgrades.squad++;
                 rebuildSquad();
-                showActionText('NEW ALLY!', '#44ff88');
+                showActionText('+1 ALLY!', '#44ff88');
                 break;
             case 'coins':
                 const amount = Math.ceil((5 + wave * 2) * diff.coins);
@@ -982,10 +1046,11 @@
         score = 0;
         coins = 0;
         squadCount = 1;
-        bulletDamage = 1;
-        fireRate = 2.5;
+        weaponLevel = 0;
         bulletSpeed = 30;
-        upgrades = { damage: 0, fireRate: 0, squad: 0, range: 0 };
+        pressure = 1.0;
+        upgrades = { weapon: 0, squad: 0, damage: 0, fireRate: 0, range: 0 };
+        applyWeapon();
 
         startScreen.classList.add('hidden');
         startScreen.classList.remove('active');
