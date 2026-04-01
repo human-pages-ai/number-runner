@@ -2,7 +2,7 @@
 
 A hyper-casual gates runner game. Swipe to choose gates, grow your number, and smash through enemy walls. Inspired by Count Masters, Number Gun, and the gates-runner genre.
 
-**[Play Now](https://last-tokens.github.io/number-runner/)** (coming soon)
+**[Play Now](https://human-pages-ai.github.io/number-runner/)**
 
 ## How to Play
 
