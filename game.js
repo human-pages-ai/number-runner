@@ -122,24 +122,26 @@
     };
 
     // ─── Materials (reusable) ───────────────────────────────────────
+    // 5-color palette: blue (player), red (enemy), green (good), soft grey (track), green (grass)
     const MAT = {
-        ally: new THREE.MeshStandardMaterial({ color: 0x4169e1 }),
+        ally: new THREE.MeshStandardMaterial({ color: 0x4A90D9 }),
         allySkin: new THREE.MeshStandardMaterial({ color: 0xffdcb0 }),
-        enemy: new THREE.MeshStandardMaterial({ color: 0xcc2222 }),
+        enemy: new THREE.MeshStandardMaterial({ color: 0xE84040 }),
         enemySkin: new THREE.MeshStandardMaterial({ color: 0xffbbaa }),
-        gateGood: new THREE.MeshStandardMaterial({ color: 0x00aa44, transparent: true, opacity: 0.85 }),
-        gateGreat: new THREE.MeshStandardMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.85 }),
-        gateBad: new THREE.MeshStandardMaterial({ color: 0xcc3333, transparent: true, opacity: 0.85 }),
-        wall: new THREE.MeshStandardMaterial({ color: 0xcc4444 }),
-        wallDark: new THREE.MeshStandardMaterial({ color: 0x992222 }),
-        boss: new THREE.MeshStandardMaterial({ color: 0x881111 }),
-        ground: new THREE.MeshStandardMaterial({ color: 0x7ec850 }),
-        track: new THREE.MeshStandardMaterial({ color: 0xaaaaaa }),
-        trackLine: new THREE.MeshStandardMaterial({ color: 0xcccccc }),
+        gateGood: new THREE.MeshStandardMaterial({ color: 0x2ECC71, transparent: true, opacity: 0.8, emissive: 0x115533, emissiveIntensity: 0.3 }),
+        gateGreat: new THREE.MeshStandardMaterial({ color: 0x3498DB, transparent: true, opacity: 0.8, emissive: 0x112255, emissiveIntensity: 0.3 }),
+        gateBad: new THREE.MeshStandardMaterial({ color: 0xE74C3C, transparent: true, opacity: 0.8, emissive: 0x551111, emissiveIntensity: 0.3 }),
+        wall: new THREE.MeshStandardMaterial({ color: 0xE74C3C }),
+        wallDark: new THREE.MeshStandardMaterial({ color: 0xC0392B }),
+        boss: new THREE.MeshStandardMaterial({ color: 0xA93226, emissive: 0x330000, emissiveIntensity: 0.4 }),
+        ground: new THREE.MeshStandardMaterial({ color: 0x90C695 }),
+        track: new THREE.MeshStandardMaterial({ color: 0xE0D8CC }),
+        trackLine: new THREE.MeshStandardMaterial({ color: 0xF0EBE0 }),
+        trackEdge: new THREE.MeshStandardMaterial({ color: 0xCCC5B8 }),
         bullet: new THREE.MeshBasicMaterial({ color: 0xffee44 }),
         bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 }),
         bulletTrail: new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.4 }),
-        pillar: new THREE.MeshStandardMaterial({ color: 0x888888 }),
+        pillar: new THREE.MeshStandardMaterial({ color: 0xBBBBBB }),
     };
 
     // ─── Geometries (reusable) ──────────────────────────────────────
@@ -181,6 +183,9 @@
     let battleTimer = 0;
     let fireCooldown = 0;
 
+    // Floating crowd count sprite
+    let crowdSprite = null;
+
     // Camera shake
     let shakeAmount = 0;
 
@@ -195,9 +200,11 @@
         walls.forEach(w => scene.remove(w.group));
         enemies.forEach(eg => { eg.units.forEach(u => scene.remove(u)); scene.remove(eg.countSprite); });
         if (bossObj) scene.remove(bossObj);
+        if (crowdSprite) scene.remove(crowdSprite);
         runners = []; gates = []; walls = []; enemies = [];
         bullets3d = []; particles3d = [];
         bossObj = null;
+        crowdSprite = null;
     }
 
     function generateLevel(lvl) {
@@ -211,6 +218,11 @@
         fireCooldown = 0;
         timescale = 1;
         timescaleTarget = 1;
+
+        // Large floating crowd count above player
+        crowdSprite = createTextSprite(crowdCount.toString(), '#ffffff', 3, true);
+        crowdSprite.position.set(0, 4, 0);
+        scene.add(crowdSprite);
 
         const segments = 7 + Math.floor(lvl * 1.5);
         let z = -20;
@@ -249,24 +261,18 @@
     function createRunner(x, z, isEnemy) {
         const g = new THREE.Group();
 
-        // Body
-        const body = new THREE.Mesh(GEO.body, isEnemy ? MAT.enemy : MAT.ally);
-        body.position.y = 0.55;
+        // Simple capsule body (pill shape) — genre standard
+        const bodyMat = isEnemy ? MAT.enemy : MAT.ally;
+        const body = new THREE.Mesh(GEO.body, bodyMat);
+        body.position.y = 0.5;
         body.castShadow = true;
         g.add(body);
 
-        // Head
+        // Head (same color as body for blob look at distance)
         const head = new THREE.Mesh(GEO.head, isEnemy ? MAT.enemySkin : MAT.allySkin);
-        head.position.y = 1.05;
+        head.position.y = 1.0;
         head.castShadow = true;
         g.add(head);
-
-        if (!isEnemy) {
-            // Gun
-            const gun = new THREE.Mesh(GEO.gun, MAT.pillar);
-            gun.position.set(0.25, 0.7, -0.15);
-            g.add(gun);
-        }
 
         g.position.set(x, 0, z);
         g.userData = {
@@ -481,38 +487,41 @@
         return group;
     }
 
-    function createTextSprite(text, color, scale) {
+    function createTextSprite(text, color, scale, large) {
         const canvas = document.createElement('canvas');
-        canvas.width = 256; canvas.height = 128;
+        const w = large ? 512 : 256;
+        const h = large ? 256 : 128;
+        canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = color;
-        ctx.font = 'bold 90px system-ui';
+        ctx.font = large ? 'bold 180px system-ui' : 'bold 90px system-ui';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = 6;
-        ctx.strokeText(text, 128, 64);
-        ctx.fillText(text, 128, 64);
+        ctx.strokeStyle = large ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = large ? 12 : 6;
+        ctx.strokeText(text, w / 2, h / 2);
+        ctx.fillText(text, w / 2, h / 2);
 
         const tex = new THREE.CanvasTexture(canvas);
         const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
         const sprite = new THREE.Sprite(spriteMat);
         sprite.scale.set(scale * 2, scale, 1);
-        sprite.userData = { canvas, ctx, tex };
+        sprite.userData = { canvas, ctx, tex, large: !!large };
         return sprite;
     }
 
     function updateSpriteText(sprite, text, color) {
-        const { canvas, ctx, tex } = sprite.userData;
-        ctx.clearRect(0, 0, 256, 128);
+        const { canvas, ctx, tex, large } = sprite.userData;
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = color || '#ffffff';
-        ctx.font = 'bold 90px system-ui';
+        ctx.font = large ? 'bold 180px system-ui' : 'bold 90px system-ui';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = 6;
-        ctx.strokeText(text, 128, 64);
-        ctx.fillText(text, 128, 64);
+        ctx.strokeStyle = large ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = large ? 12 : 6;
+        ctx.strokeText(text, w / 2, h / 2);
+        ctx.fillText(text, w / 2, h / 2);
         tex.needsUpdate = true;
     }
 
@@ -521,39 +530,51 @@
         groundTiles.forEach(t => scene.remove(t));
         groundTiles = [];
 
-        // Ground
+        // Wide grass ground
         const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(40, 500),
+            new THREE.PlaneGeometry(60, 600),
             MAT.ground
         );
         ground.rotation.x = -Math.PI / 2;
-        ground.position.z = -200;
+        ground.position.z = -250;
         ground.receiveShadow = true;
         scene.add(ground);
         groundTiles.push(ground);
 
-        // Track
+        // Wider track (warm beige)
         const track = new THREE.Mesh(
-            new THREE.PlaneGeometry(11, 500),
+            new THREE.PlaneGeometry(12, 600),
             MAT.track
         );
         track.rotation.x = -Math.PI / 2;
         track.position.y = 0.01;
-        track.position.z = -200;
+        track.position.z = -250;
         track.receiveShadow = true;
         scene.add(track);
         groundTiles.push(track);
 
-        // Center line
-        const line = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.15, 500),
+        // Track edge strips
+        [-6.1, 6.1].forEach(x => {
+            const edge = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.25, 600),
+                MAT.trackEdge
+            );
+            edge.rotation.x = -Math.PI / 2;
+            edge.position.set(x, 0.015, -250);
+            scene.add(edge);
+            groundTiles.push(edge);
+        });
+
+        // Subtle center dashes (no solid line — just track color contrast)
+        const centerLine = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.12, 600),
             MAT.trackLine
         );
-        line.rotation.x = -Math.PI / 2;
-        line.position.y = 0.02;
-        line.position.z = -200;
-        scene.add(line);
-        groundTiles.push(line);
+        centerLine.rotation.x = -Math.PI / 2;
+        centerLine.position.y = 0.02;
+        centerLine.position.z = -250;
+        scene.add(centerLine);
+        groundTiles.push(centerLine);
     }
 
     // ─── Shooting ───────────────────────────────────────────────────
@@ -973,6 +994,8 @@
         // Number animation
         countAnim.scale = 1.5;
         countAnim.targetScale = 1;
+        countAnim.color = diff > 0 ? '#51cf66' : '#ff6b6b';
+        countAnim.colorTimer = 0.4;
 
         return diff;
     }
@@ -1089,6 +1112,27 @@
             r.position.z = r.userData.baseZ * spread * 0.5;
             r.position.y = Math.abs(Math.sin(time + r.userData.phase)) * 0.12;
         });
+
+        // Update floating crowd number
+        if (crowdSprite) {
+            crowdSprite.position.x = crowdX;
+            crowdSprite.position.y = 3.5 + Math.sin(time * 0.3) * 0.15;
+            // Color timer — flash green/red then back to white
+            if (countAnim.colorTimer > 0) {
+                countAnim.colorTimer -= dt;
+                if (countAnim.colorTimer <= 0) countAnim.color = '#ffffff';
+            }
+            const displayCount = Math.round(crowdCount);
+            const color = countAnim.color || '#ffffff';
+            if (crowdSprite.userData.lastText !== displayCount.toString() || crowdSprite.userData.lastColor !== color) {
+                updateSpriteText(crowdSprite, displayCount.toString(), color);
+                crowdSprite.userData.lastText = displayCount.toString();
+                crowdSprite.userData.lastColor = color;
+            }
+            // Punch scale animation
+            const s = countAnim.scale * 3;
+            crowdSprite.scale.set(s * 2, s, 1);
+        }
 
         // Animate enemy units
         enemies.forEach(eg => {
