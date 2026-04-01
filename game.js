@@ -130,10 +130,10 @@
         wallTop: new THREE.MeshStandardMaterial({ color: 0x666677 }),
         skin: new THREE.MeshStandardMaterial({ color: 0xDDBB88 }),
         skinDark: new THREE.MeshStandardMaterial({ color: 0xBB9966 }),
-        soldierBody: new THREE.MeshStandardMaterial({ color: 0x556B2F }),
-        soldierPants: new THREE.MeshStandardMaterial({ color: 0x3B4A28 }),
-        soldierBoots: new THREE.MeshStandardMaterial({ color: 0x333333 }),
-        soldierVest: new THREE.MeshStandardMaterial({ color: 0x4A5A30 }),
+        soldierBody: new THREE.MeshStandardMaterial({ color: 0x88AA44 }),
+        soldierPants: new THREE.MeshStandardMaterial({ color: 0x667733 }),
+        soldierBoots: new THREE.MeshStandardMaterial({ color: 0x555555 }),
+        soldierVest: new THREE.MeshStandardMaterial({ color: 0xAACC55 }),
         gun: new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.7, roughness: 0.3 }),
         gunAccent: new THREE.MeshStandardMaterial({ color: 0x556633, metalness: 0.3 }),
         zombieSkin: new THREE.MeshStandardMaterial({ color: 0x779966 }),
@@ -343,42 +343,43 @@
         return g;
     }
 
+    function addPart(group, geo, mat, x, y, z) {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(x, y, z);
+        group.add(m);
+        return m;
+    }
+
     function createWeaponMesh(level) {
         const g = new THREE.Group();
         switch (level) {
             case 0: // Pistol
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.25), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
-                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.15, 4), MAT.gun), { position: new THREE.Vector3(0, 0.03, -0.18) }));
-                g.children[1].rotation.x = Math.PI / 2;
+                addPart(g, new THREE.BoxGeometry(0.08, 0.12, 0.25), MAT.gun, 0, 0, 0);
+                addPart(g, new THREE.CylinderGeometry(0.025, 0.025, 0.15, 4), MAT.gun, 0, 0.03, -0.18).rotation.x = Math.PI / 2;
                 break;
             case 1: // SMG
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.35), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
-                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 4), MAT.gun), { position: new THREE.Vector3(0, 0.03, -0.25) }));
-                g.children[1].rotation.x = Math.PI / 2;
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.05), MAT.gun), { position: new THREE.Vector3(0, -0.1, 0.05) }));
+                addPart(g, new THREE.BoxGeometry(0.09, 0.12, 0.35), MAT.gun, 0, 0, 0);
+                addPart(g, new THREE.CylinderGeometry(0.025, 0.025, 0.2, 4), MAT.gun, 0, 0.03, -0.25).rotation.x = Math.PI / 2;
+                addPart(g, new THREE.BoxGeometry(0.06, 0.15, 0.05), MAT.gun, 0, -0.1, 0.05);
                 break;
             case 2: // Shotgun
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
-                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.25, 6), MAT.gun), { position: new THREE.Vector3(0, 0.02, -0.35) }));
-                g.children[1].rotation.x = Math.PI / 2;
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.1), MAT.gunAccent), { position: new THREE.Vector3(0, -0.05, -0.05) }));
+                addPart(g, new THREE.BoxGeometry(0.1, 0.1, 0.5), MAT.gun, 0, 0, 0);
+                addPart(g, new THREE.CylinderGeometry(0.04, 0.04, 0.25, 6), MAT.gun, 0, 0.02, -0.35).rotation.x = Math.PI / 2;
+                addPart(g, new THREE.BoxGeometry(0.12, 0.08, 0.1), MAT.gunAccent, 0, -0.05, -0.05);
                 break;
             case 3: // Machine Gun
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.55), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
-                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), MAT.gun), { position: new THREE.Vector3(0, 0.03, -0.4) }));
-                g.children[1].rotation.x = Math.PI / 2;
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.12), MAT.gunAccent), { position: new THREE.Vector3(0, -0.08, 0.12) }));
+                addPart(g, new THREE.BoxGeometry(0.12, 0.12, 0.55), MAT.gun, 0, 0, 0);
+                addPart(g, new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), MAT.gun, 0, 0.03, -0.4).rotation.x = Math.PI / 2;
+                addPart(g, new THREE.BoxGeometry(0.1, 0.12, 0.12), MAT.gunAccent, 0, -0.08, 0.12);
                 break;
             case 4: // Minigun
-                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.45), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
+                addPart(g, new THREE.BoxGeometry(0.15, 0.15, 0.45), MAT.gun, 0, 0, 0);
                 for (let i = 0; i < 4; i++) {
                     const a = (i / 4) * Math.PI * 2;
-                    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4), MAT.gun);
-                    barrel.rotation.x = Math.PI / 2;
-                    barrel.position.set(Math.cos(a) * 0.04, Math.sin(a) * 0.04 + 0.02, -0.38);
-                    g.add(barrel);
+                    addPart(g, new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4), MAT.gun,
+                        Math.cos(a) * 0.04, Math.sin(a) * 0.04 + 0.02, -0.38).rotation.x = Math.PI / 2;
                 }
-                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), MAT.gunAccent), { position: new THREE.Vector3(0, -0.1, 0.08) }));
+                addPart(g, new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), MAT.gunAccent, 0, -0.1, 0.08);
                 break;
         }
         return g;
