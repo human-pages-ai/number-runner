@@ -14,10 +14,10 @@
         scene.background = new THREE.Color(0x1a1520);
         scene.fog = new THREE.FogExp2(0x1a1520, 0.018);
 
-        // Behind-the-player camera — tight over-the-shoulder
-        camera = new THREE.PerspectiveCamera(60, W() / H(), 0.1, 200);
-        camera.position.set(0, 4, 7);
-        camera.lookAt(0, 1.5, -10);
+        // Behind-the-player camera — very close, right behind squad
+        camera = new THREE.PerspectiveCamera(65, W() / H(), 0.1, 200);
+        camera.position.set(0, 3.5, 5.5);
+        camera.lookAt(0, 1, -8);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(W(), H());
@@ -229,27 +229,12 @@
             }
         }
 
-        // Side walls — low, dark, unobtrusive
+        // Side walls — very low, very dark, just a border
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 1.0, metalness: 0 });
         for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 100),
-                new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.95 }));
-            wall.position.set(side * (ROAD_W / 2 + 0.3), 0.75, -25);
-            wall.castShadow = true;
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.8, 100), wallMat);
+            wall.position.set(side * (ROAD_W / 2 + 0.2), 0.4, -25);
             scene.add(wall); envMeshes.push(wall);
-
-            // Wall cap / ledge
-            const cap = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, 100),
-                new THREE.MeshStandardMaterial({ color: 0x3a3a44 }));
-            cap.position.set(side * (ROAD_W / 2 + 0.3), 1.5, -25);
-            scene.add(cap); envMeshes.push(cap);
-
-            // Buttresses every 10 units
-            for (let z = 0; z > -60; z -= 10) {
-                const buttress = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.5, 0.6),
-                    new THREE.MeshStandardMaterial({ color: 0x333340 }));
-                buttress.position.set(side * (ROAD_W / 2 + 0.05), 0.75, z);
-                scene.add(buttress); envMeshes.push(buttress);
-            }
         }
 
         // Ground beyond walls
@@ -291,13 +276,11 @@
             scene.add(sandbag); envMeshes.push(sandbag);
         }
 
-        // Ambient fire barrels along walls (just orange point lights)
-        for (let z = -5; z > -50; z -= 12) {
-            for (const side of [-1, 1]) {
-                const fLight = new THREE.PointLight(0xff5500, 0.3, 8);
-                fLight.position.set(side * (ROAD_W / 2 - 0.3), 2, z);
-                scene.add(fLight); envMeshes.push(fLight);
-            }
+        // Subtle ground lights along the road center
+        for (let z = -5; z > -50; z -= 15) {
+            const fLight = new THREE.PointLight(0xff6622, 0.2, 6);
+            fLight.position.set(0, 0.5, z);
+            scene.add(fLight); envMeshes.push(fLight);
         }
     }
 
@@ -532,7 +515,7 @@
         soldier.add(weapon);
 
         soldier.position.set(aimX + ox, 0, DEFENSE_Z + 1);
-        soldier.scale.setScalar(1.8); // big, clearly visible from behind
+        soldier.scale.setScalar(2.2); // big, clearly visible from behind
         soldier.userData.offsetX = ox;
         soldier.userData.weapon = weapon;
         soldier.userData.phase = Math.random() * Math.PI * 2;
@@ -1077,10 +1060,10 @@
         // Camera shake
         if (shakeAmount > 0.01) {
             camera.position.x = (Math.random()-0.5) * shakeAmount * 2;
-            camera.position.y = 4 + (Math.random()-0.5) * shakeAmount;
+            camera.position.y = 3.5 + (Math.random()-0.5) * shakeAmount;
             shakeAmount *= 0.88;
         } else {
-            camera.position.x = 0; camera.position.y = 4; shakeAmount = 0;
+            camera.position.x = 0; camera.position.y = 3.5; shakeAmount = 0;
         }
 
         // Wave progress
