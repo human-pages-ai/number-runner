@@ -149,7 +149,7 @@
     // ─── Difficulty ─────────────────────────────────────────────────
     const DIFF = {
         easy:   { enemySpeed: 1.2, enemyHP: 0.4, spawnRate: 0.5, barrelRate: 1.5, coins: 1.5 },
-        normal: { enemySpeed: 1.6, enemyHP: 0.6, spawnRate: 0.6, barrelRate: 1.2, coins: 1.0 },
+        normal: { enemySpeed: 1.3, enemyHP: 0.5, spawnRate: 0.5, barrelRate: 1.2, coins: 1.0 },
         hard:   { enemySpeed: 2.2, enemyHP: 1.0, spawnRate: 1.0, barrelRate: 0.8, coins: 0.7 },
     };
     let diff = DIFF.normal;
@@ -561,114 +561,237 @@
         barrels.push(crate);
     }
 
+    // ── Bullet creation — brighter, bigger dots (VFX agent) ──
     function createBullet(fromX, fromZ) {
         const w = WEAPONS[weaponLevel];
         const g = new THREE.Group();
         g.position.set(fromX + (Math.random()-0.5)*0.15, 0.4, fromZ);
 
-        // Bright yellow-white core — big enough to see from above
-        const core = new THREE.Mesh(new THREE.SphereGeometry(w.size * 1.8, 6, 6),
-            new THREE.MeshBasicMaterial({ color: 0xffff66 }));
+        // Bright white-yellow core — bigger for visibility from high angle
+        const core = new THREE.Mesh(new THREE.SphereGeometry(w.size * 2.2, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0xffffaa }));
         g.add(core);
 
-        // Orange glow
-        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 3.5, 6, 6),
-            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.35 }));
+        // Orange glow — wider and brighter
+        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 4.5, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.4 }));
         g.add(glow);
 
         g.userData = { damage: bulletDamage, life: 2.5, vx: (Math.random() - 0.5) * 2.0 };
         scene.add(g); bullets.push(g);
     }
 
+    // ── Muzzle flash — brighter, bigger (VFX agent) ──
     function spawnMuzzleFlash(x, z) {
-        // Large bright core flash
+        // Large bright core flash — bigger and brighter
         const flash = new THREE.Mesh(
-            new THREE.SphereGeometry(0.35, 8, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffee44, transparent: true, opacity: 0.9 })
+            new THREE.SphereGeometry(0.5, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffffaa, transparent: true, opacity: 1.0 })
         );
         flash.position.set(x, 0.7, z - 0.5);
-        flash.userData = { life: 0.08 };
+        flash.userData = { life: 0.1 };
         scene.add(flash);
         muzzleFlashes.push(flash);
 
-        // Outer orange glow
+        // Outer orange glow — wider
         const glow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.6, 6, 6),
-            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.4 })
+            new THREE.SphereGeometry(0.85, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.5 })
         );
         glow.position.set(x, 0.7, z - 0.5);
-        glow.userData = { life: 0.06 };
+        glow.userData = { life: 0.08 };
         scene.add(glow);
         muzzleFlashes.push(glow);
 
-        // Dynamic muzzle light
-        const mLight = new THREE.PointLight(0xff8822, 2.0, 8);
+        // Dynamic muzzle light — brighter (VFX agent)
+        const mLight = new THREE.PointLight(0xff8822, 3.5, 10);
         mLight.position.set(x, 1, z - 0.5);
-        mLight.userData = { life: 0.05 };
+        mLight.userData = { life: 0.07 };
         scene.add(mLight);
         muzzleFlashes.push(mLight);
+
+        // Muzzle sparks — small bright dots ejecting forward (VFX agent)
+        for (let i = 0; i < 3; i++) {
+            const spark = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04, 4, 4),
+                new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 1.0 })
+            );
+            spark.position.set(x + (Math.random()-0.5)*0.3, 0.7, z - 0.5);
+            spark.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*3, Math.random()*2+1, -(Math.random()*3+1)),
+                life: 0.15 + Math.random() * 0.1,
+            };
+            scene.add(spark); particles.push(spark);
+        }
     }
 
+    // ── Generic particles — more, brighter, with fire sparks (VFX agent) ──
     function spawnParticles(x, y, z, color, count) {
         for (let i = 0; i < count; i++) {
             const mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(0.12, 0.12, 0.12),
+                new THREE.BoxGeometry(0.15, 0.15, 0.15),
                 new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
             );
             mesh.position.set(x, y, z);
             mesh.userData = {
-                vel: new THREE.Vector3((Math.random()-0.5)*5, Math.random()*5+2, (Math.random()-0.5)*5),
-                life: 0.5 + Math.random() * 0.4,
+                vel: new THREE.Vector3((Math.random()-0.5)*6, Math.random()*6+2, (Math.random()-0.5)*6),
+                life: 0.5 + Math.random() * 0.5,
             };
             scene.add(mesh); particles.push(mesh);
         }
+        // Add fire sparks on each hit for more visual chaos
+        const sparkColors = [0xff6600, 0xffaa00, 0xffcc44];
+        for (let i = 0; i < 3; i++) {
+            const spark = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04 + Math.random() * 0.04, 4, 4),
+                new THREE.MeshBasicMaterial({ color: sparkColors[Math.floor(Math.random()*3)], transparent: true, opacity: 1 })
+            );
+            spark.position.set(x, y, z);
+            spark.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*4, Math.random()*4+1, (Math.random()-0.5)*4),
+                life: 0.3 + Math.random() * 0.4,
+            };
+            scene.add(spark); particles.push(spark);
+        }
     }
 
+    // ── VFX OVERHAUL (visual-effects agent) ──────────────────────────
+    // Changes: 2-3x bigger explosions with secondary fireballs, ground fire
+    // decals (flat glowing circles), denser ambient embers, brighter muzzle
+    // flashes, more fire particles, white-yellow flash on explosion.
+
     function spawnExplosion(x, z) {
-        // Big fireball core
+        // ── Primary fireball — LARGE (2.5x original) ──
         const fireball = new THREE.Mesh(
-            new THREE.SphereGeometry(0.8, 8, 8),
-            new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.8 })
+            new THREE.SphereGeometry(2.0, 10, 10),
+            new THREE.MeshBasicMaterial({ color: 0xffaa22, transparent: true, opacity: 0.9 })
         );
-        fireball.position.set(x, 1.0, z);
-        fireball.userData = { vel: new THREE.Vector3(0, 2, 0), life: 0.3 };
+        fireball.position.set(x, 1.2, z);
+        fireball.userData = { vel: new THREE.Vector3(0, 1.5, 0), life: 0.45 };
         scene.add(fireball); particles.push(fireball);
 
-        // Explosion light
-        const eLight = new THREE.PointLight(0xff6600, 3.0, 12);
-        eLight.position.set(x, 1.5, z);
-        eLight.userData = { life: 0.25 };
+        // ── Secondary fireballs — staggered outward for BIG area fill ──
+        for (let i = 0; i < 4; i++) {
+            const ang = (i / 4) * Math.PI * 2 + Math.random() * 0.5;
+            const dist = 0.8 + Math.random() * 0.6;
+            const fb2 = new THREE.Mesh(
+                new THREE.SphereGeometry(1.2 + Math.random() * 0.6, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.85 })
+            );
+            fb2.position.set(x + Math.cos(ang) * dist, 0.8 + Math.random() * 0.6, z + Math.sin(ang) * dist);
+            fb2.userData = {
+                vel: new THREE.Vector3(Math.cos(ang) * 2, 2 + Math.random() * 2, Math.sin(ang) * 2),
+                life: 0.25 + Math.random() * 0.3,
+            };
+            scene.add(fb2); particles.push(fb2);
+        }
+
+        // ── Bright white-yellow flash (instant) ──
+        const flash = new THREE.Mesh(
+            new THREE.SphereGeometry(3.0, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffffcc, transparent: true, opacity: 0.7 })
+        );
+        flash.position.set(x, 1.0, z);
+        flash.userData = { vel: new THREE.Vector3(0, 0, 0), life: 0.08 };
+        scene.add(flash); particles.push(flash);
+
+        // ── Explosion light — brighter, wider ──
+        const eLight = new THREE.PointLight(0xff6600, 6.0, 20);
+        eLight.position.set(x, 2.0, z);
+        eLight.userData = { life: 0.4 };
         scene.add(eLight); muzzleFlashes.push(eLight);
 
-        // Fire particles — lots of them
-        for (let i = 0; i < 25; i++) {
-            const colors = [0xff4400, 0xff8800, 0xffcc00, 0xff2200, 0xff6600];
+        // ── Fire particles — 3x count, wider spread ──
+        for (let i = 0; i < 60; i++) {
+            const colors = [0xff4400, 0xff8800, 0xffcc00, 0xff2200, 0xff6600, 0xffee44, 0xff5500];
             const c = colors[Math.floor(Math.random() * colors.length)];
-            const size = 0.12 + Math.random() * 0.2;
+            const size = 0.15 + Math.random() * 0.35;
             const mesh = new THREE.Mesh(
                 new THREE.SphereGeometry(size, 5, 5),
                 new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 1 })
             );
-            mesh.position.set(x + (Math.random()-0.5)*0.5, 0.5 + Math.random() * 0.5, z + (Math.random()-0.5)*0.5);
+            const spread = 1.5;
+            mesh.position.set(
+                x + (Math.random()-0.5) * spread,
+                0.3 + Math.random() * 0.8,
+                z + (Math.random()-0.5) * spread
+            );
             mesh.userData = {
-                vel: new THREE.Vector3((Math.random()-0.5)*6, Math.random()*8+2, (Math.random()-0.5)*6),
-                life: 0.3 + Math.random() * 0.6,
+                vel: new THREE.Vector3(
+                    (Math.random()-0.5) * 10,
+                    Math.random() * 10 + 3,
+                    (Math.random()-0.5) * 10
+                ),
+                life: 0.4 + Math.random() * 0.8,
             };
             scene.add(mesh); particles.push(mesh);
         }
 
-        // Smoke puffs
-        for (let i = 0; i < 8; i++) {
+        // ── Smoke puffs — more, bigger ──
+        for (let i = 0; i < 15; i++) {
             const smoke = new THREE.Mesh(
-                new THREE.SphereGeometry(0.2 + Math.random() * 0.3, 5, 5),
-                new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.6 })
+                new THREE.SphereGeometry(0.3 + Math.random() * 0.5, 5, 5),
+                new THREE.MeshBasicMaterial({ color: 0x555555, transparent: true, opacity: 0.5 })
             );
-            smoke.position.set(x + (Math.random()-0.5), 1 + Math.random(), z + (Math.random()-0.5));
+            smoke.position.set(x + (Math.random()-0.5)*1.5, 1 + Math.random()*1.5, z + (Math.random()-0.5)*1.5);
             smoke.userData = {
-                vel: new THREE.Vector3((Math.random()-0.5)*2, Math.random()*3+1, (Math.random()-0.5)*2),
-                life: 0.5 + Math.random() * 0.8,
+                vel: new THREE.Vector3((Math.random()-0.5)*3, Math.random()*4+1, (Math.random()-0.5)*3),
+                life: 0.6 + Math.random() * 1.0,
             };
             scene.add(smoke); particles.push(smoke);
+        }
+
+        // ── Ground fire decal — flat glowing circle on the road ──
+        spawnGroundFire(x, z);
+    }
+
+    function spawnGroundFire(x, z) {
+        // Outer orange glow decal
+        const decalSize = 2.0 + Math.random() * 1.5;
+        const glow = new THREE.Mesh(
+            new THREE.CircleGeometry(decalSize, 16),
+            new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.5 })
+        );
+        glow.rotation.x = -Math.PI / 2;
+        glow.position.set(x, 0.03, z);
+        glow.userData = { vel: new THREE.Vector3(0, 0, 0), life: 2.5 + Math.random() * 1.5, isGroundFire: true };
+        scene.add(glow); particles.push(glow);
+
+        // Inner bright yellow core
+        const core = new THREE.Mesh(
+            new THREE.CircleGeometry(decalSize * 0.5, 12),
+            new THREE.MeshBasicMaterial({ color: 0xffcc22, transparent: true, opacity: 0.6 })
+        );
+        core.rotation.x = -Math.PI / 2;
+        core.position.set(x, 0.04, z);
+        core.userData = { vel: new THREE.Vector3(0, 0, 0), life: 2.0 + Math.random() * 1.0, isGroundFire: true };
+        scene.add(core); particles.push(core);
+
+        // Ground fire point light
+        const gLight = new THREE.PointLight(0xff6622, 1.5, 8);
+        gLight.position.set(x, 0.5, z);
+        gLight.userData = { life: 2.0 };
+        scene.add(gLight); muzzleFlashes.push(gLight);
+
+        // Small flame particles rising from ground fire
+        for (let i = 0; i < 6; i++) {
+            const flame = new THREE.Mesh(
+                new THREE.SphereGeometry(0.08 + Math.random() * 0.1, 4, 4),
+                new THREE.MeshBasicMaterial({
+                    color: [0xff4400, 0xff8800, 0xffaa00][Math.floor(Math.random()*3)],
+                    transparent: true, opacity: 0.9
+                })
+            );
+            flame.position.set(
+                x + (Math.random()-0.5) * decalSize * 0.8,
+                0.1,
+                z + (Math.random()-0.5) * decalSize * 0.8
+            );
+            flame.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*0.3, 1.5 + Math.random()*2, (Math.random()-0.5)*0.3),
+                life: 0.8 + Math.random() * 0.6,
+            };
+            scene.add(flame); particles.push(flame);
         }
     }
 
@@ -683,7 +806,7 @@
     // ─── Wave System ────────────────────────────────────────────────
     function startWave() {
         wave++;
-        const baseCount = 3 + wave * 3 + wave * wave * 0.5;
+        const baseCount = 2 + wave * 2 + wave * wave * 0.4;
         const enemyCount = Math.floor(baseCount * diff.spawnRate * pressure);
         const barrelCount = Math.floor((3 + Math.min(wave * 0.8, 6)) * diff.barrelRate);
         waveEnemiesLeft = enemyCount;
@@ -811,29 +934,72 @@
     }
 
     // ─── Ambient Fire ───────────────────────────────────────────────
+    // ── Ambient fire — denser embers + small ground fires (VFX agent) ──
     let ambientFireTimer = 0;
+    let ambientGroundFireTimer = 0;
+    const FIRE_COLORS = [0xff4400, 0xff6600, 0xff8800, 0xffaa00, 0xffcc00, 0xffee44];
     function spawnAmbientFire(dt) {
         ambientFireTimer += dt;
-        if (ambientFireTimer < 0.15) return;
-        ambientFireTimer = 0;
+        // Spawn embers more frequently (was 0.15, now 0.06)
+        if (ambientFireTimer >= 0.06) {
+            ambientFireTimer = 0;
 
-        // Embers floating up from the battlefield
-        const colors = [0xff4400, 0xff6600, 0xff8800, 0xffaa00];
-        for (let i = 0; i < 2; i++) {
-            const ember = new THREE.Mesh(
-                new THREE.SphereGeometry(0.04 + Math.random() * 0.04, 4, 4),
-                new THREE.MeshBasicMaterial({ color: colors[Math.floor(Math.random() * colors.length)], transparent: true, opacity: 0.8 })
+            // Embers floating up from the battlefield — 5 per tick (was 2)
+            const colors = FIRE_COLORS;
+            for (let i = 0; i < 5; i++) {
+                const ember = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.03 + Math.random() * 0.06, 4, 4),
+                    new THREE.MeshBasicMaterial({ color: colors[Math.floor(Math.random() * colors.length)], transparent: true, opacity: 0.9 })
+                );
+                ember.position.set(
+                    (Math.random() - 0.5) * ROAD_W,
+                    Math.random() * 0.3,
+                    -3 - Math.random() * 40
+                );
+                ember.userData = {
+                    vel: new THREE.Vector3((Math.random()-0.5)*0.8, 1.5 + Math.random()*3, (Math.random()-0.5)*0.5),
+                    life: 1.0 + Math.random() * 2.0,
+                };
+                scene.add(ember); particles.push(ember);
+            }
+        }
+
+        // Periodically spawn small ground fires on the road during combat
+        ambientGroundFireTimer += dt;
+        if (ambientGroundFireTimer >= 3.0 && enemies.length > 0) {
+            ambientGroundFireTimer = 0;
+            const gx = (Math.random() - 0.5) * ROAD_W * 0.7;
+            const gz = -5 - Math.random() * 25;
+            // Small ground fire decal
+            const smallSize = 0.5 + Math.random() * 0.8;
+            const glow = new THREE.Mesh(
+                new THREE.CircleGeometry(smallSize, 10),
+                new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.35 })
             );
-            ember.position.set(
-                (Math.random() - 0.5) * ROAD_W,
-                Math.random() * 0.5,
-                -5 - Math.random() * 40
-            );
-            ember.userData = {
-                vel: new THREE.Vector3((Math.random()-0.5)*0.5, 1.5 + Math.random()*2, (Math.random()-0.5)*0.3),
-                life: 1.0 + Math.random() * 1.5,
-            };
-            scene.add(ember); particles.push(ember);
+            glow.rotation.x = -Math.PI / 2;
+            glow.position.set(gx, 0.02, gz);
+            glow.userData = { vel: new THREE.Vector3(0, 0, 0), life: 3.0 + Math.random() * 2.0, isGroundFire: true };
+            scene.add(glow); particles.push(glow);
+            // Small flickering flames
+            for (let j = 0; j < 3; j++) {
+                const flame = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.05 + Math.random() * 0.06, 4, 4),
+                    new THREE.MeshBasicMaterial({
+                        color: FIRE_COLORS[Math.floor(Math.random()*FIRE_COLORS.length)],
+                        transparent: true, opacity: 0.8
+                    })
+                );
+                flame.position.set(
+                    gx + (Math.random()-0.5) * smallSize,
+                    0.05,
+                    gz + (Math.random()-0.5) * smallSize
+                );
+                flame.userData = {
+                    vel: new THREE.Vector3((Math.random()-0.5)*0.2, 1.0 + Math.random()*1.5, (Math.random()-0.5)*0.2),
+                    life: 0.6 + Math.random() * 0.5,
+                };
+                scene.add(flame); particles.push(flame);
+            }
         }
     }
 
@@ -917,12 +1083,22 @@
             SFX.shoot();
         }
 
-        // Move bullets
+        // Move bullets (VFX agent: added sparse bullet trail particles)
         for (let i = bullets.length - 1; i >= 0; i--) {
             const b = bullets[i];
             b.position.z -= bulletSpeed * dt;
             b.position.x += (b.userData.vx || 0) * dt;
             b.userData.life -= dt;
+            // Sparse bullet trail — every ~3 frames per bullet
+            if (Math.random() < 0.3) {
+                const trail = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.06, 4, 4),
+                    new THREE.MeshBasicMaterial({ color: 0xffaa44, transparent: true, opacity: 0.6 })
+                );
+                trail.position.copy(b.position);
+                trail.userData = { vel: new THREE.Vector3(0, 0.3, 0.5), life: 0.15 };
+                scene.add(trail); particles.push(trail);
+            }
             if (b.userData.life <= 0 || b.position.z < SPAWN_Z_MIN - 10) {
                 scene.remove(b); bullets.splice(i, 1); continue;
             }
@@ -997,18 +1173,26 @@
             if (m.userData.life <= 0) { scene.remove(m); muzzleFlashes.splice(i, 1); }
         }
 
-        // Particles
+        // Particles (VFX agent: ground fire decals fade differently)
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
-            p.position.add(p.userData.vel.clone().multiplyScalar(dt));
-            p.userData.vel.y -= 10 * dt;
-            p.userData.vel.multiplyScalar(0.98); // air drag
-            p.userData.life -= dt;
-            p.material.opacity = Math.max(0, p.userData.life * 2);
-            // Fire/smoke grows as it fades
-            const scale = 1 + (1 - p.userData.life) * 1.5;
-            p.scale.setScalar(scale);
-            if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+            if (p.userData.isGroundFire) {
+                // Ground fire decals: stay flat, flicker opacity, no movement/growth
+                p.userData.life -= dt;
+                const flicker = 0.8 + Math.sin(Date.now() * 0.01 + i * 7) * 0.2;
+                p.material.opacity = Math.max(0, Math.min(1, p.userData.life * 0.4) * flicker);
+                if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+            } else {
+                p.position.add(p.userData.vel.clone().multiplyScalar(dt));
+                p.userData.vel.y -= 10 * dt;
+                p.userData.vel.multiplyScalar(0.98); // air drag
+                p.userData.life -= dt;
+                p.material.opacity = Math.max(0, p.userData.life * 2);
+                // Fire/smoke grows as it fades
+                const scale = 1 + (1 - p.userData.life) * 1.5;
+                p.scale.setScalar(scale);
+                if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+            }
         }
 
         // Coin pickups
@@ -1079,11 +1263,21 @@
     }
     function onUp() { dragging = false; }
 
+    // Mouse input
     document.addEventListener('mousedown', e => onDown(e.clientX));
     document.addEventListener('mousemove', e => onMove(e.clientX));
     document.addEventListener('mouseup', onUp);
-    document.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
-    document.addEventListener('touchmove', e => { e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
+
+    // Touch input — only preventDefault when game is active (not on overlays/buttons)
+    document.addEventListener('touchstart', e => {
+        if (state === 'playing') e.preventDefault();
+        if (e.touches.length > 0) onDown(e.touches[0].clientX);
+        ensureAudio();
+    }, { passive: false });
+    document.addEventListener('touchmove', e => {
+        if (state === 'playing') e.preventDefault();
+        if (e.touches.length > 0) onMove(e.touches[0].clientX);
+    }, { passive: false });
     document.addEventListener('touchend', onUp);
 
     const keys = {};
