@@ -202,6 +202,10 @@
     let spawnTimer = 0;
     let barrelTimer = 0;
 
+    // Adaptive difficulty — scales up when player is cruising, eases off when struggling
+    let pressure = 1.0;       // multiplier on enemy count/HP/speed
+    let squadAtWaveStart = 1; // track losses
+
     // Defense line — enemies reaching this Z = damage
     const DEFENSE_Z = 4;
     const SPAWN_Z_MIN = -35;
@@ -594,8 +598,9 @@
     // ─── Wave System ────────────────────────────────────────────────
     function startWave() {
         wave++;
-        // Exponential enemy scaling — upgrades feel earned but pressure mounts
-        const enemyCount = Math.floor((5 + wave * 4 + wave * wave * 0.8) * diff.spawnRate);
+        // Exponential enemy scaling, amplified by adaptive pressure
+        const baseCount = 5 + wave * 4 + wave * wave * 0.8;
+        const enemyCount = Math.floor(baseCount * diff.spawnRate * pressure);
         const barrelCount = Math.floor((2 + Math.min(wave * 0.6, 5)) * diff.barrelRate);
         waveEnemiesLeft = enemyCount;
         waveEnemiesTotal = enemyCount;
@@ -607,6 +612,7 @@
         hudEl.style.display = 'flex';
         waveBar.style.display = 'block';
 
+        squadAtWaveStart = squadCount;
         rebuildSquad();
         updateHUD();
         showActionText('WAVE ' + wave, '#ff6b35');
@@ -648,6 +654,20 @@
     ];
 
     function showUpgradeShop() {
+        // Adaptive difficulty: adjust pressure based on how the wave went
+        const lostMembers = squadAtWaveStart - squadCount;
+        if (lostMembers === 0 && squadCount >= 3) {
+            // Cruising — ramp up significantly
+            pressure = Math.min(pressure + 0.25, 3.0);
+        } else if (lostMembers === 0) {
+            // No losses but small squad — gentle ramp
+            pressure = Math.min(pressure + 0.1, 3.0);
+        } else if (lostMembers >= 2) {
+            // Struggling — ease off
+            pressure = Math.max(pressure - 0.15, 0.6);
+        }
+        // pressure stays the same if exactly 1 member lost (balanced)
+
         state = 'waveclear';
         wsWave.textContent = wave;
         wsCoins.textContent = coins;
@@ -707,7 +727,7 @@
         spawnTimer += dt;
         if (waveEnemiesLeft > 0 && spawnTimer >= spawnInterval) {
             spawnTimer = 0;
-            const hp = Math.ceil((2 + wave * 2 + wave * wave * 0.3 + Math.random() * wave) * diff.enemyHP);
+            const hp = Math.ceil((2 + wave * 2 + wave * wave * 0.3 + Math.random() * wave) * diff.enemyHP * (0.7 + pressure * 0.3));
             const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
             spawnEnemy(z, hp);
             waveEnemiesLeft--;
