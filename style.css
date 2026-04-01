@@ -5,10 +5,12 @@
 }
 
 body {
-    background: #0a0a1a;
+    background: #e8f4f8;
     overflow: hidden;
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 canvas {
@@ -28,12 +30,14 @@ canvas {
     align-items: center;
     justify-content: center;
     pointer-events: none;
+    z-index: 10;
 }
 
 .screen {
     text-align: center;
-    color: #fff;
+    color: #333;
     pointer-events: auto;
+    padding: 2rem;
 }
 
 .screen.hidden {
@@ -43,35 +47,36 @@ canvas {
 .screen h1 {
     font-size: 3.5rem;
     font-weight: 900;
-    letter-spacing: 0.1em;
-    text-shadow: 0 0 30px rgba(0, 200, 255, 0.5);
+    letter-spacing: 0.05em;
+    color: #ff6b9d;
+    text-shadow: 3px 3px 0 rgba(0,0,0,0.1);
     margin-bottom: 0.5rem;
     line-height: 1.1;
 }
 
 .subtitle {
-    color: #8af;
+    color: #666;
     font-size: 1rem;
     margin-bottom: 2rem;
 }
 
 button {
-    background: linear-gradient(135deg, #00c8ff, #0080ff);
+    background: linear-gradient(135deg, #ff6b9d, #ff8a65);
     border: none;
     color: #fff;
-    font-size: 1.3rem;
-    font-weight: 700;
-    padding: 0.8rem 3rem;
+    font-size: 1.4rem;
+    font-weight: 800;
+    padding: 1rem 3.5rem;
     border-radius: 50px;
     cursor: pointer;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.1em;
     transition: transform 0.15s, box-shadow 0.15s;
-    box-shadow: 0 4px 20px rgba(0, 150, 255, 0.4);
+    box-shadow: 0 6px 20px rgba(255, 107, 157, 0.4);
 }
 
 button:hover {
     transform: scale(1.05);
-    box-shadow: 0 6px 30px rgba(0, 150, 255, 0.6);
+    box-shadow: 0 8px 30px rgba(255, 107, 157, 0.5);
 }
 
 button:active {
@@ -81,54 +86,66 @@ button:active {
 .credit {
     margin-top: 2rem;
     font-size: 0.75rem;
-    color: #556;
+    color: #999;
 }
 
 .credit a {
-    color: #8af;
+    color: #ff6b9d;
     text-decoration: none;
 }
 
 #game-over-screen h1 {
-    color: #f44;
-    text-shadow: 0 0 30px rgba(255, 50, 50, 0.5);
+    color: #ff4466;
 }
 
-#final-score, #final-wave {
+#game-over-screen h1.win {
+    color: #4ecdc4;
+}
+
+#final-level, #final-score {
     font-size: 1.2rem;
-    color: #ccc;
+    color: #555;
     margin: 0.3rem 0;
+    font-weight: 600;
 }
 
-#hud {
+/* Progress bar */
+#progress-bar {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    display: flex;
-    justify-content: space-between;
-    padding: 12px 20px;
-    color: #fff;
-    font-size: 0.85rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    pointer-events: none;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(300px, 70vw);
+    height: 20px;
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    overflow: hidden;
+    z-index: 5;
     display: none;
 }
 
-#hud > div {
-    background: rgba(0, 0, 0, 0.4);
-    padding: 4px 12px;
-    border-radius: 6px;
+#progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4ecdc4, #44b09e);
+    border-radius: 10px;
+    transition: width 0.2s ease;
+}
+
+#level-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 0.1em;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
 @media (max-width: 600px) {
     .screen h1 {
-        font-size: 2.2rem;
-    }
-    #hud {
-        font-size: 0.7rem;
-        padding: 8px 10px;
+        font-size: 2.5rem;
     }
 }
