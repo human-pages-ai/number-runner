@@ -156,6 +156,23 @@
         pillar: new THREE.CylinderGeometry(0.15, 0.15, 4, 6),
     };
 
+    // ─── Difficulty ────────────────────────────────────────────────
+    const DIFF = {
+        easy:   { speed: 0.28, startCrowd: 5, wallHP: 0.5, bossHP: 0.5, segments: 0.7, label: 'EASY' },
+        normal: { speed: 0.38, startCrowd: 2, wallHP: 1.0, bossHP: 1.0, segments: 1.0, label: 'NORMAL' },
+        hard:   { speed: 0.45, startCrowd: 2, wallHP: 1.4, bossHP: 1.3, segments: 1.3, label: 'HARD' },
+    };
+    let difficulty = DIFF.normal;
+
+    // Difficulty selector UI
+    document.querySelectorAll('.diff-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            difficulty = DIFF[btn.dataset.diff];
+        });
+    });
+
     // ─── Game State ─────────────────────────────────────────────────
     let state = 'menu'; // menu | running | battle | smashing | complete | gameover
     let level = 1;
@@ -210,8 +227,8 @@
     function generateLevel(lvl) {
         clearLevel();
 
-        speed = 0.38 + lvl * 0.025;
-        crowdCount = 2 + Math.floor(lvl / 3);
+        speed = difficulty.speed + lvl * 0.025;
+        crowdCount = difficulty.startCrowd + Math.floor(lvl / 3);
         crowdX = 0;
         targetX = 0;
         distance = 0;
@@ -224,7 +241,7 @@
         crowdSprite.position.set(0, 4, 0);
         scene.add(crowdSprite);
 
-        const segments = 7 + Math.floor(lvl * 1.5);
+        const segments = Math.floor((7 + Math.floor(lvl * 1.5)) * difficulty.segments);
         let z = -20;
 
         for (let i = 0; i < segments; i++) {
@@ -234,7 +251,7 @@
                 gates.push(pair);
             } else {
                 // Wall with enemies
-                const hp = Math.floor((10 + lvl * 6) * (0.7 + Math.random() * 0.6));
+                const hp = Math.floor((10 + lvl * 6) * (0.7 + Math.random() * 0.6) * difficulty.wallHP);
                 const wall = createWall(z, hp);
                 walls.push(wall);
 
@@ -247,7 +264,7 @@
         }
 
         // Boss
-        bossMaxHP = Math.floor(40 + lvl * 25 + lvl * lvl * 2);
+        bossMaxHP = Math.floor((40 + lvl * 25 + lvl * lvl * 2) * difficulty.bossHP);
         bossHP = bossMaxHP;
         bossObj = createBoss(z - 15);
 

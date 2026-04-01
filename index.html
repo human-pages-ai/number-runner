@@ -71,6 +71,22 @@
         }
         .credit a { color: rgba(255,255,255,0.7); text-decoration: none; }
 
+        /* Difficulty selector */
+        .difficulty {
+            display: flex; gap: 8px; margin-bottom: 1.2rem;
+        }
+        .diff-btn {
+            background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.4);
+            color: #fff; font-size: 0.9rem; font-weight: 700;
+            padding: 0.5rem 1.1rem; border-radius: 25px;
+            cursor: pointer; transition: all 0.15s;
+        }
+        .diff-btn:active { transform: scale(0.95); }
+        .diff-btn.selected {
+            background: rgba(255,255,255,0.35); border-color: #fff;
+            box-shadow: 0 0 12px rgba(255,255,255,0.3);
+        }
+
         /* HUD */
         #hud {
             position: absolute; top: 10px; left: 10px; right: 10px;
@@ -126,6 +142,11 @@
     <div id="start-screen" class="overlay active">
         <h1>NUMBER<br>RUNNER</h1>
         <p class="subtitle">Choose gates. Grow your army. Smash through walls.</p>
+        <div class="difficulty">
+            <button class="diff-btn" data-diff="easy">EASY</button>
+            <button class="diff-btn selected" data-diff="normal">NORMAL</button>
+            <button class="diff-btn" data-diff="hard">HARD</button>
+        </div>
         <button class="btn" id="btn-start">▶ PLAY</button>
         <p class="credit">Powered by <a href="https://github.com/last-tokens">LastTokens</a></p>
     </div>
