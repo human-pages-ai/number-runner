@@ -4,29 +4,140 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Number Runner — LastTokens</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            background: #87ceeb;
+        }
+        canvas { display: block; }
+
+        .overlay {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .overlay.active { pointer-events: auto; }
+        .overlay.hidden { display: none; }
+
+        /* Start screen */
+        #start-screen {
+            background: linear-gradient(180deg, rgba(135,206,235,0.9), rgba(100,180,220,0.95));
+        }
+        #start-screen h1 {
+            font-size: 3.2rem; font-weight: 900;
+            color: #fff; text-shadow: 3px 3px 0 rgba(0,0,0,0.15);
+            line-height: 1.1; margin-bottom: 0.3rem;
+        }
+        .subtitle {
+            color: rgba(255,255,255,0.85); font-size: 1rem; margin-bottom: 2rem;
+        }
+
+        /* Game over */
+        #gameover-screen {
+            background: rgba(0,0,0,0.8);
+        }
+        #gameover-screen h1 {
+            font-size: 2.8rem; font-weight: 900; margin-bottom: 0.5rem;
+        }
+        #gameover-screen h1.lose { color: #ff6b6b; }
+        #gameover-screen h1.win { color: #51cf66; }
+        .stat { color: #ddd; font-size: 1.2rem; margin: 0.2rem 0; font-weight: 600; }
+        .stat.highlight { color: #feca57; font-size: 1.5rem; }
+
+        /* Buttons */
+        .btn {
+            background: linear-gradient(135deg, #51cf66, #40c057);
+            border: none; color: #fff;
+            font-size: 1.3rem; font-weight: 800;
+            padding: 0.9rem 3rem; border-radius: 50px;
+            cursor: pointer; letter-spacing: 0.08em;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+            margin-top: 1.5rem;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn.retry { background: linear-gradient(135deg, #339af0, #228be6); }
+
+        .credit {
+            margin-top: 2rem; font-size: 0.7rem;
+            color: rgba(255,255,255,0.5);
+        }
+        .credit a { color: rgba(255,255,255,0.7); text-decoration: none; }
+
+        /* HUD */
+        #hud {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: none; justify-content: space-between;
+            pointer-events: none; z-index: 5;
+        }
+        .hud-box {
+            background: rgba(0,0,0,0.5); color: #fff;
+            padding: 6px 14px; border-radius: 10px;
+            font-size: 0.9rem; font-weight: 700;
+        }
+        .hud-blue { background: rgba(65,105,225,0.75); }
+        .hud-yellow { background: rgba(200,160,0,0.75); }
+
+        /* Progress bar */
+        #progress {
+            position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
+            width: min(280px, 65vw); height: 8px;
+            background: rgba(0,0,0,0.2); border-radius: 4px;
+            z-index: 5; display: none;
+        }
+        #progress-fill {
+            height: 100%; width: 0%; border-radius: 4px;
+            background: linear-gradient(90deg, #51cf66, #feca57);
+            transition: width 0.15s;
+        }
+
+        /* Floating action text */
+        #action-text {
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%,-50%);
+            font-size: 3rem; font-weight: 900; color: #fff;
+            text-shadow: 3px 3px 0 rgba(0,0,0,0.3);
+            z-index: 8; pointer-events: none;
+            opacity: 0; transition: opacity 0.3s;
+        }
+        #action-text.show { opacity: 1; }
+
+        @media (max-width: 600px) {
+            #start-screen h1 { font-size: 2.2rem; }
+            #gameover-screen h1 { font-size: 2rem; }
+        }
+    </style>
 </head>
 <body>
-    <canvas id="game"></canvas>
-    <div id="ui-overlay">
-        <div id="start-screen" class="screen">
-            <h1>NUMBER<br>RUNNER</h1>
-            <p class="subtitle">Choose your gates. Grow your number. Smash through walls.</p>
-            <button id="btn-start">PLAY</button>
-            <p class="credit">Powered by <a href="https://github.com/last-tokens">LastTokens</a> — built with leftover AI tokens</p>
-        </div>
-        <div id="game-over-screen" class="screen hidden">
-            <h1 id="gameover-title">GAME OVER</h1>
-            <p id="final-level"></p>
-            <p id="final-score"></p>
-            <button id="btn-restart">PLAY AGAIN</button>
-        </div>
+    <div id="hud">
+        <div class="hud-box hud-blue">👥 <span id="count-display">1</span></div>
+        <div class="hud-box hud-yellow">LV <span id="level-display">1</span></div>
     </div>
-    <!-- Progress bar -->
-    <div id="progress-bar">
-        <div id="progress-fill"></div>
-        <span id="level-label">LEVEL 1</span>
+
+    <div id="progress"><div id="progress-fill"></div></div>
+    <div id="action-text"></div>
+
+    <div id="start-screen" class="overlay active">
+        <h1>NUMBER<br>RUNNER</h1>
+        <p class="subtitle">Choose gates. Grow your army. Smash through walls.</p>
+        <button class="btn" id="btn-start">▶ PLAY</button>
+        <p class="credit">Powered by <a href="https://github.com/last-tokens">LastTokens</a></p>
     </div>
+
+    <div id="gameover-screen" class="overlay hidden">
+        <h1 id="go-title" class="lose">GAME OVER</h1>
+        <p class="stat">Level <span id="go-level">1</span></p>
+        <p class="stat highlight">Score: <span id="go-score">0</span></p>
+        <button class="btn retry" id="btn-retry">TRY AGAIN</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

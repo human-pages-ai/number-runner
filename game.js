@@ -1,356 +1,679 @@
 // Number Runner — LastTokens
-// Gates-runner + shooter. Choose gates, grow your army, shoot down enemy walls.
-// Built with leftover AI tokens for the public good.
+// 3D gates-runner with shooting. Built with leftover AI tokens.
 
 (function () {
     'use strict';
 
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
+    // ─── Three.js Setup ─────────────────────────────────────────────
+    let scene, camera, renderer;
+    const W = () => window.innerWidth;
+    const H = () => window.innerHeight;
 
-    // ─── Responsive canvas ──────────────────────────────────────────
-    let W, H, TRACK_W, TRACK_L, TRACK_R, LANE_W;
-    function resize() {
-        canvas.width = W = window.innerWidth;
-        canvas.height = H = window.innerHeight;
-        TRACK_W = Math.min(W * 0.85, 420);
-        TRACK_L = (W - TRACK_W) / 2;
-        TRACK_R = TRACK_L + TRACK_W;
-        LANE_W = TRACK_W / 2;
+    function initRenderer() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        scene.fog = new THREE.Fog(0x87ceeb, 40, 120);
+
+        camera = new THREE.PerspectiveCamera(60, W() / H(), 0.1, 500);
+        camera.position.set(0, 10, 16);
+        camera.lookAt(0, 0, -8);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(W(), H());
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+        // Lights
+        const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+        scene.add(ambient);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 0.85);
+        sun.position.set(8, 20, 10);
+        sun.castShadow = true;
+        sun.shadow.camera.left = -20;
+        sun.shadow.camera.right = 20;
+        sun.shadow.camera.top = 20;
+        sun.shadow.camera.bottom = -20;
+        sun.shadow.mapSize.width = 1024;
+        sun.shadow.mapSize.height = 1024;
+        scene.add(sun);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = W() / H();
+            camera.updateProjectionMatrix();
+            renderer.setSize(W(), H());
+        });
     }
-    window.addEventListener('resize', resize);
-    resize();
 
     // ─── DOM ────────────────────────────────────────────────────────
     const startScreen = document.getElementById('start-screen');
-    const gameOverScreen = document.getElementById('game-over-screen');
-    const gameOverTitle = document.getElementById('gameover-title');
-    const finalLevel = document.getElementById('final-level');
-    const finalScore = document.getElementById('final-score');
-    const progressBar = document.getElementById('progress-bar');
+    const gameoverScreen = document.getElementById('gameover-screen');
+    const goTitle = document.getElementById('go-title');
+    const goLevel = document.getElementById('go-level');
+    const goScore = document.getElementById('go-score');
+    const countDisplay = document.getElementById('count-display');
+    const levelDisplay = document.getElementById('level-display');
+    const hudEl = document.getElementById('hud');
+    const progressEl = document.getElementById('progress');
     const progressFill = document.getElementById('progress-fill');
-    const levelLabel = document.getElementById('level-label');
+    const actionText = document.getElementById('action-text');
 
-    // ─── State ──────────────────────────────────────────────────────
-    let gameState = 'menu';
-    let level = 1;
-    let playerNum = 1;
-    let playerX = 0;
-    let targetX = 0;
-    let scrollY = 0;
-    let levelLength = 0;
-    let score = 0;
-    let lastTime = 0;
-    let fireCooldown = 0;
+    // ─── Audio (Web Audio API) ──────────────────────────────────────
+    let audioCtx;
+    function ensureAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
 
-    let obstacles = [];
-    let gatePairs = [];
-    let bullets = [];
-    let particles = [];
-    let floatingTexts = [];
-    let stickmen = [];
-    let muzzleFlashes = [];
-    let enemyGroups = []; // groups of enemy stickmen in front of walls
+    function playTone(freq, dur, type, vol, ramp) {
+        ensureAudio();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        if (ramp) osc.frequency.linearRampToValueAtTime(ramp, audioCtx.currentTime + dur);
+        gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    }
 
-    let shakeX = 0, shakeY = 0, shakeMag = 0;
-    let boss = null;
-    let smashTimer = 0;
+    function playNoise(dur, vol) {
+        ensureAudio();
+        const bufSize = audioCtx.sampleRate * dur;
+        const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        src.connect(gain);
+        gain.connect(audioCtx.destination);
+        src.start();
+    }
 
-    // Stickman colors palette
-    const ARMY_COLORS = ['#ff6b9d', '#ff8a80', '#ff5252', '#e84393', '#fd79a8'];
-    const ENEMY_COLORS = ['#636e72', '#2d3436', '#6c5ce7', '#a29bfe', '#74b9ff'];
-    const ENEMY_SKIN = ['#dfe6e9', '#b2bec3', '#a4b0be'];
-
-    // ─── Colors ─────────────────────────────────────────────────────
-    const C = {
-        track: '#e8e8e8',
-        trackLine: '#d0d0d0',
-        grass1: '#7ed56f',
-        grass2: '#55c57a',
-        grassStripe: '#6cc965',
-        sky: '#87ceeb',
-        skyBottom: '#c8e6f0',
-        player: '#ff6b9d',
-        wallBg: '#e74c3c',
-        wallDark: '#c0392b',
-        wallText: '#fff',
-        gateGood: '#00b894',
-        gateGreat: '#6c5ce7',
-        gateBad: '#e17055',
-        gateText: '#fff',
-        bossWall: '#8e1b1b',
-        bossFace: '#c0392b',
-        bullet: '#feca57',
-        bulletGlow: '#f9ca24',
-        muzzle: '#fff3b0',
+    const SFX = {
+        shoot: () => playNoise(0.02, 0.04),
+        hit: () => playTone(80, 0.05, 'sine', 0.1),
+        wallBreak: () => { playNoise(0.15, 0.12); playTone(60, 0.15, 'sine', 0.15); },
+        gateGood: () => { playTone(800, 0.12, 'sine', 0.12, 1200); },
+        gateGreat: () => {
+            playTone(523, 0.1, 'sine', 0.1);
+            setTimeout(() => playTone(659, 0.1, 'sine', 0.1), 60);
+            setTimeout(() => playTone(784, 0.15, 'sine', 0.12), 120);
+        },
+        gateBad: () => playTone(400, 0.1, 'square', 0.06, 200),
+        bossHit: () => playTone(60, 0.1, 'sine', 0.15),
+        levelComplete: () => {
+            [523, 659, 784, 1047].forEach((f, i) => {
+                setTimeout(() => playTone(f, 0.15, 'sine', 0.12), i * 100);
+            });
+        },
+        gameOver: () => {
+            [330, 262, 220].forEach((f, i) => {
+                setTimeout(() => playTone(f, 0.25, 'sine', 0.1), i * 200);
+            });
+        },
     };
 
+    // ─── Materials (reusable) ───────────────────────────────────────
+    const MAT = {
+        ally: new THREE.MeshStandardMaterial({ color: 0x4169e1 }),
+        allySkin: new THREE.MeshStandardMaterial({ color: 0xffdcb0 }),
+        enemy: new THREE.MeshStandardMaterial({ color: 0xcc2222 }),
+        enemySkin: new THREE.MeshStandardMaterial({ color: 0xffbbaa }),
+        gateGood: new THREE.MeshStandardMaterial({ color: 0x00aa44, transparent: true, opacity: 0.85 }),
+        gateGreat: new THREE.MeshStandardMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.85 }),
+        gateBad: new THREE.MeshStandardMaterial({ color: 0xcc3333, transparent: true, opacity: 0.85 }),
+        wall: new THREE.MeshStandardMaterial({ color: 0xcc4444 }),
+        wallDark: new THREE.MeshStandardMaterial({ color: 0x992222 }),
+        boss: new THREE.MeshStandardMaterial({ color: 0x881111 }),
+        ground: new THREE.MeshStandardMaterial({ color: 0x7ec850 }),
+        track: new THREE.MeshStandardMaterial({ color: 0xaaaaaa }),
+        trackLine: new THREE.MeshStandardMaterial({ color: 0xcccccc }),
+        bullet: new THREE.MeshBasicMaterial({ color: 0xfeca57 }),
+        pillar: new THREE.MeshStandardMaterial({ color: 0x888888 }),
+    };
+
+    // ─── Geometries (reusable) ──────────────────────────────────────
+    const GEO = {
+        body: new THREE.CylinderGeometry(0.2, 0.25, 0.7, 6),
+        head: new THREE.SphereGeometry(0.18, 6, 6),
+        gun: new THREE.BoxGeometry(0.08, 0.08, 0.35),
+        bullet: new THREE.SphereGeometry(0.06, 4, 4),
+        wallBlock: new THREE.BoxGeometry(1, 1, 1),
+        gateFrame: new THREE.BoxGeometry(5, 3.5, 0.25),
+        pillar: new THREE.CylinderGeometry(0.15, 0.15, 4, 6),
+    };
+
+    // ─── Game State ─────────────────────────────────────────────────
+    let state = 'menu'; // menu | running | battle | smashing | complete | gameover
+    let level = 1;
+    let score = 0;
+    let crowdCount = 0;
+    let crowdX = 0;
+    let targetX = 0;
+    let distance = 0;
+    let levelDist = 0;
+    let speed = 0;
+    let timescale = 1;
+    let timescaleTarget = 1;
+
+    let runners = [];      // player army 3D objects
+    let gates = [];         // gate pair groups
+    let walls = [];         // wall obstacles
+    let enemies = [];       // enemy groups
+    let bullets3d = [];     // bullet meshes
+    let particles3d = [];   // particle meshes
+    let groundTiles = [];
+
+    let bossObj = null;
+    let bossHP = 0;
+    let bossMaxHP = 0;
+    let battleTimer = 0;
+    let fireCooldown = 0;
+
+    // Camera shake
+    let shakeAmount = 0;
+
+    // Number animation
+    let countAnim = { scale: 1, targetScale: 1, color: null };
+
     // ─── Level Generation ───────────────────────────────────────────
+    function clearLevel() {
+        // Remove all dynamic objects
+        [...runners, ...bullets3d, ...particles3d].forEach(o => scene.remove(o));
+        gates.forEach(g => scene.remove(g.group));
+        walls.forEach(w => scene.remove(w.group));
+        enemies.forEach(eg => { eg.units.forEach(u => scene.remove(u)); scene.remove(eg.countSprite); });
+        if (bossObj) scene.remove(bossObj);
+        runners = []; gates = []; walls = []; enemies = [];
+        bullets3d = []; particles3d = [];
+        bossObj = null;
+    }
+
     function generateLevel(lvl) {
-        obstacles = [];
-        gatePairs = [];
-        enemyGroups = [];
-        bullets = [];
-        boss = null;
+        clearLevel();
 
-        const segmentCount = 5 + Math.floor(lvl * 1.5);
-        const spacing = 350;
-        let y = -500;
+        speed = 0.3 + lvl * 0.015;
+        crowdCount = 2 + Math.floor(lvl / 2);
+        crowdX = 0;
+        targetX = 0;
+        distance = 0;
+        fireCooldown = 0;
+        timescale = 1;
+        timescaleTarget = 1;
 
-        for (let i = 0; i < segmentCount; i++) {
+        const segments = 6 + Math.floor(lvl * 1.2);
+        let z = -25;
+
+        for (let i = 0; i < segments; i++) {
             if (i % 2 === 0) {
-                const pair = generateGatePair(lvl);
-                pair.y = y;
-                gatePairs.push(pair);
+                // Gate pair
+                const pair = createGatePair(z, lvl);
+                gates.push(pair);
             } else {
-                const hp = Math.floor((8 + lvl * 5) * (0.6 + Math.random() * 0.8));
-                const wall = {
-                    y: y,
-                    hp: hp,
-                    maxHp: hp,
-                    smashed: false,
-                    w: TRACK_W * 0.85,
-                    h: 60,
-                    hitFlash: 0,
-                };
-                obstacles.push(wall);
+                // Wall with enemies
+                const hp = Math.floor((6 + lvl * 4) * (0.7 + Math.random() * 0.6));
+                const wall = createWall(z, hp);
+                walls.push(wall);
 
                 // Enemy group in front of wall
-                const enemyCount = Math.min(Math.ceil(hp / 5), 12);
-                const group = [];
-                for (let e = 0; e < enemyCount; e++) {
-                    group.push({
-                        ox: (Math.random() - 0.5) * TRACK_W * 0.6,
-                        oy: -40 - Math.random() * 50,
-                        phase: Math.random() * Math.PI * 2,
-                        color: ENEMY_COLORS[Math.floor(Math.random() * ENEMY_COLORS.length)],
-                        skin: ENEMY_SKIN[Math.floor(Math.random() * ENEMY_SKIN.length)],
-                        alive: true,
-                        hp: 2 + Math.floor(lvl / 2),
-                    });
-                }
-                enemyGroups.push({ wallIndex: obstacles.length - 1, y: y, enemies: group });
+                const enemyCount = Math.min(Math.ceil(hp / 4), 15);
+                const eg = createEnemyGroup(z + 3, enemyCount, lvl);
+                enemies.push(eg);
             }
-            y -= spacing;
+            z -= 18;
         }
 
         // Boss
-        const bossHp = Math.floor(30 + lvl * 20 + lvl * lvl * 2);
-        boss = {
-            y: y - 300,
-            hp: bossHp,
-            maxHp: bossHp,
-            w: TRACK_W * 0.95,
-            h: 120,
-            smashed: false,
-            hitFlash: 0,
-        };
+        bossMaxHP = Math.floor(25 + lvl * 18 + lvl * lvl * 1.5);
+        bossHP = bossMaxHP;
+        bossObj = createBoss(z - 15);
 
-        levelLength = Math.abs(boss.y) + 600;
-        scrollY = 0;
-        playerNum = 2 + Math.floor(lvl / 2);
+        levelDist = Math.abs(z - 15) + 30;
+
+        updateRunners();
+        updateHUD();
     }
 
-    function generateGatePair(lvl) {
-        const ops = [];
+    // ─── Create Entities ────────────────────────────────────────────
+    function createRunner(x, z, isEnemy) {
+        const g = new THREE.Group();
+
+        // Body
+        const body = new THREE.Mesh(GEO.body, isEnemy ? MAT.enemy : MAT.ally);
+        body.position.y = 0.55;
+        body.castShadow = true;
+        g.add(body);
+
+        // Head
+        const head = new THREE.Mesh(GEO.head, isEnemy ? MAT.enemySkin : MAT.allySkin);
+        head.position.y = 1.05;
+        head.castShadow = true;
+        g.add(head);
+
+        if (!isEnemy) {
+            // Gun
+            const gun = new THREE.Mesh(GEO.gun, MAT.pillar);
+            gun.position.set(0.25, 0.7, -0.15);
+            g.add(gun);
+        }
+
+        g.position.set(x, 0, z);
+        g.userData = {
+            baseX: x, baseZ: z,
+            phase: Math.random() * Math.PI * 2,
+            isEnemy, dead: false
+        };
+
+        scene.add(g);
+        return g;
+    }
+
+    function updateRunners() {
+        const target = Math.min(Math.round(crowdCount), 80);
+        while (runners.length < target) {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.sqrt(Math.random()) * Math.min(3.5, Math.sqrt(runners.length + 1) * 0.6);
+            runners.push(createRunner(Math.cos(a) * r, Math.sin(a) * r, false));
+        }
+        while (runners.length > target) {
+            scene.remove(runners.pop());
+        }
+    }
+
+    function createGatePair(z, lvl) {
+        const group = new THREE.Group();
+        group.position.z = z;
+
+        // Generate operations
+        let leftOp, rightOp;
         if (Math.random() < 0.5) {
-            const mult = Math.random() < 0.25 + lvl * 0.02 ? 3 : 2;
-            ops.push({ op: 'x', val: mult, label: 'x' + mult });
+            const m = Math.random() < 0.25 + lvl * 0.02 ? 3 : 2;
+            leftOp = { op: 'x', val: m, label: '×' + m };
         } else {
-            const add = 3 + Math.floor(Math.random() * (4 + lvl * 2));
-            ops.push({ op: '+', val: add, label: '+' + add });
+            const a = 3 + Math.floor(Math.random() * (4 + lvl * 2));
+            leftOp = { op: '+', val: a, label: '+' + a };
         }
 
         const r = Math.random();
         if (r < 0.3) {
-            if (Math.random() < 0.5) {
-                const sub = 1 + Math.floor(Math.random() * (2 + lvl));
-                ops.push({ op: '-', val: sub, label: '-' + sub });
-            } else {
-                ops.push({ op: '/', val: 2, label: '÷2' });
-            }
-        } else if (r < 0.6) {
-            const add = 1 + Math.floor(Math.random() * 4);
-            ops.push({ op: '+', val: add, label: '+' + add });
+            const s = 2 + Math.floor(Math.random() * (2 + lvl));
+            rightOp = { op: '-', val: s, label: '-' + s };
+        } else if (r < 0.55) {
+            rightOp = { op: '/', val: 2, label: '÷2' };
+        } else if (r < 0.75) {
+            const a = 1 + Math.floor(Math.random() * 4);
+            rightOp = { op: '+', val: a, label: '+' + a };
         } else {
-            ops.push({ op: 'x', val: 2, label: 'x2' });
+            rightOp = { op: 'x', val: 2, label: '×2' };
         }
 
-        if (Math.random() < 0.5) ops.reverse();
-        return { y: 0, left: ops[0], right: ops[1], collected: false };
+        if (Math.random() < 0.5) { const tmp = leftOp; leftOp = rightOp; rightOp = tmp; }
+
+        // Create gate meshes
+        const leftGate = createGateMesh(leftOp, -3);
+        const rightGate = createGateMesh(rightOp, 3);
+        group.add(leftGate);
+        group.add(rightGate);
+
+        // Pillars
+        [-5.5, 0, 5.5].forEach(px => {
+            const p = new THREE.Mesh(GEO.pillar, MAT.pillar);
+            p.position.set(px, 2, 0);
+            p.castShadow = true;
+            group.add(p);
+        });
+
+        // Top bar
+        const topBar = new THREE.Mesh(
+            new THREE.BoxGeometry(11, 0.3, 0.3),
+            MAT.pillar
+        );
+        topBar.position.set(0, 4, 0);
+        group.add(topBar);
+
+        scene.add(group);
+
+        return {
+            group, z, leftOp, rightOp,
+            passed: false,
+        };
     }
 
-    function applyGate(gate) {
-        const old = playerNum;
-        switch (gate.op) {
-            case '+': playerNum += gate.val; break;
-            case '-': playerNum = Math.max(1, playerNum - gate.val); break;
-            case 'x': playerNum *= gate.val; break;
-            case '/': playerNum = Math.max(1, Math.ceil(playerNum / gate.val)); break;
-        }
-        playerNum = Math.min(playerNum, 9999);
-        return playerNum - old;
+    function createGateMesh(op, xPos) {
+        const isGood = op.op === '+' || op.op === 'x';
+        const isGreat = op.op === 'x' && op.val >= 3;
+        const mat = isGreat ? MAT.gateGreat : isGood ? MAT.gateGood : MAT.gateBad;
+
+        const g = new THREE.Group();
+        const frame = new THREE.Mesh(GEO.gateFrame, mat);
+        frame.position.set(0, 1.75, 0);
+        g.add(frame);
+
+        // Text sprite
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = isGreat ? '#7c3aed' : isGood ? '#00aa44' : '#cc3333';
+        ctx.fillRect(0, 0, 256, 128);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 80px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(op.label, 128, 64);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const textMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(4, 2),
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+        );
+        textMesh.position.set(0, 2, 0.15);
+        g.add(textMesh);
+
+        g.position.x = xPos;
+        return g;
     }
 
-    // ─── Stickmen ───────────────────────────────────────────────────
-    function updateStickmen() {
-        const target = Math.min(Math.round(playerNum), 60);
-        while (stickmen.length < target) {
-            stickmen.push({
-                ox: (Math.random() - 0.5) * Math.min(70, 30 + target),
-                oy: (Math.random() - 0.5) * Math.min(50, 20 + target * 0.5),
-                phase: Math.random() * Math.PI * 2,
-                color: ARMY_COLORS[Math.floor(Math.random() * ARMY_COLORS.length)],
-                gunAngle: -0.3 + Math.random() * 0.6,
-            });
+    function createWall(z, hp) {
+        const group = new THREE.Group();
+        group.position.z = z;
+
+        // Build wall from blocks
+        const cols = 8;
+        const rows = 3;
+        for (let r = 0; r < rows; r++) {
+            const offset = r % 2 === 0 ? 0 : 0.5;
+            for (let c = 0; c < cols; c++) {
+                const block = new THREE.Mesh(GEO.wallBlock, MAT.wall);
+                block.position.set(-3.5 + c + offset, 0.5 + r, 0);
+                block.castShadow = true;
+                group.add(block);
+            }
         }
-        while (stickmen.length > target) stickmen.pop();
+
+        // Number sprite
+        const sprite = createTextSprite(hp.toString(), '#ffffff', 1.5);
+        sprite.position.set(0, 1.5, 0.6);
+        group.add(sprite);
+
+        scene.add(group);
+
+        return { group, z, hp, maxHp: hp, sprite, smashed: false };
+    }
+
+    function createEnemyGroup(z, count, lvl) {
+        const units = [];
+        for (let i = 0; i < count; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.sqrt(Math.random()) * Math.min(3, Math.sqrt(count) * 0.6);
+            const unit = createRunner(Math.cos(a) * r, z + Math.sin(a) * r - 2, true);
+            units.push(unit);
+        }
+
+        const sprite = createTextSprite(count.toString(), '#ff6666', 0.8);
+        sprite.position.set(0, 2.5, z - 1);
+        scene.add(sprite);
+
+        return { units, z, alive: count, countSprite: sprite, wallIndex: walls.length - 1 };
+    }
+
+    function createBoss(z) {
+        const group = new THREE.Group();
+        group.position.z = z;
+
+        // Large boss body
+        const body = new THREE.Mesh(
+            new THREE.BoxGeometry(10, 5, 2),
+            MAT.boss
+        );
+        body.position.y = 2.5;
+        body.castShadow = true;
+        group.add(body);
+
+        // Eyes
+        const eyeGeo = new THREE.SphereGeometry(0.5, 8, 8);
+        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xfeca57 });
+        const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+        leftEye.position.set(-1.5, 3.2, 1.1);
+        group.add(leftEye);
+        const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+        rightEye.position.set(1.5, 3.2, 1.1);
+        group.add(rightEye);
+
+        // Pupils
+        const pupilGeo = new THREE.SphereGeometry(0.2, 6, 6);
+        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const lp = new THREE.Mesh(pupilGeo, pupilMat);
+        lp.position.set(-1.5, 3.2, 1.5);
+        group.add(lp);
+        const rp = new THREE.Mesh(pupilGeo, pupilMat);
+        rp.position.set(1.5, 3.2, 1.5);
+        group.add(rp);
+
+        // Mouth (jagged teeth)
+        for (let i = 0; i < 6; i++) {
+            const tooth = new THREE.Mesh(
+                new THREE.ConeGeometry(0.2, 0.5, 3),
+                new THREE.MeshStandardMaterial({ color: 0xffffff })
+            );
+            tooth.position.set(-2 + i * 0.8, 1.8 + (i % 2 === 0 ? 0 : 0.2), 1.1);
+            tooth.rotation.x = Math.PI;
+            group.add(tooth);
+        }
+
+        // HP text
+        const sprite = createTextSprite(bossMaxHP.toString(), '#ffffff', 2);
+        sprite.position.set(0, 0.5, 1.5);
+        group.add(sprite);
+        group.userData = { hpSprite: sprite };
+
+        scene.add(group);
+        return group;
+    }
+
+    function createTextSprite(text, color, scale) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = color;
+        ctx.font = 'bold 90px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 6;
+        ctx.strokeText(text, 128, 64);
+        ctx.fillText(text, 128, 64);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.scale.set(scale * 2, scale, 1);
+        sprite.userData = { canvas, ctx, tex };
+        return sprite;
+    }
+
+    function updateSpriteText(sprite, text, color) {
+        const { canvas, ctx, tex } = sprite.userData;
+        ctx.clearRect(0, 0, 256, 128);
+        ctx.fillStyle = color || '#ffffff';
+        ctx.font = 'bold 90px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 6;
+        ctx.strokeText(text, 128, 64);
+        ctx.fillText(text, 128, 64);
+        tex.needsUpdate = true;
+    }
+
+    // ─── Ground ─────────────────────────────────────────────────────
+    function initGround() {
+        groundTiles.forEach(t => scene.remove(t));
+        groundTiles = [];
+
+        // Ground
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(40, 500),
+            MAT.ground
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.z = -200;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        groundTiles.push(ground);
+
+        // Track
+        const track = new THREE.Mesh(
+            new THREE.PlaneGeometry(11, 500),
+            MAT.track
+        );
+        track.rotation.x = -Math.PI / 2;
+        track.position.y = 0.01;
+        track.position.z = -200;
+        track.receiveShadow = true;
+        scene.add(track);
+        groundTiles.push(track);
+
+        // Center line
+        const line = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.15, 500),
+            MAT.trackLine
+        );
+        line.rotation.x = -Math.PI / 2;
+        line.position.y = 0.02;
+        line.position.z = -200;
+        scene.add(line);
+        groundTiles.push(line);
     }
 
     // ─── Shooting ───────────────────────────────────────────────────
-    function findShootTarget() {
-        // Find nearest enemy group or wall ahead (on screen, not smashed)
+    function findTarget() {
+        // Find nearest enemy or wall ahead
+        let best = null;
         let bestDist = Infinity;
-        let bestTarget = null;
 
-        for (const wall of obstacles) {
-            if (wall.smashed) continue;
-            const wy = screenYOf(wall.y);
-            if (wy < 0 || wy > playerScreenY() - 30) {
-                const dist = playerScreenY() - wy;
-                if (dist > 0 && dist < bestDist) {
-                    bestDist = dist;
-                    bestTarget = { type: 'wall', wall, wy };
-                }
+        for (const eg of enemies) {
+            if (eg.alive <= 0) continue;
+            const dz = -(eg.z - distance * (1 / speed));
+            if (dz > 2 && dz < 40 && dz < bestDist) {
+                bestDist = dz;
+                best = { type: 'enemy', eg };
             }
         }
 
-        // Also target enemy groups
-        for (const eg of enemyGroups) {
-            const wy = screenYOf(eg.y);
-            const dist = playerScreenY() - wy;
-            if (dist > 30 && dist < bestDist && dist < H) {
-                const aliveCount = eg.enemies.filter(e => e.alive).length;
-                if (aliveCount > 0) {
-                    bestDist = dist;
-                    bestTarget = { type: 'group', group: eg, wy };
-                }
+        for (const w of walls) {
+            if (w.smashed) continue;
+            const wz = w.group.position.z;
+            if (wz < -2 && wz > -40 && -wz < bestDist) {
+                bestDist = -wz;
+                best = { type: 'wall', wall: w };
             }
         }
 
-        // Boss
-        if (boss && !boss.smashed) {
-            const by = screenYOf(boss.y);
-            const dist = playerScreenY() - by;
-            if (dist > 30 && dist < bestDist && dist < H) {
-                bestDist = dist;
-                bestTarget = { type: 'boss', wy: by };
+        if (bossObj && bossHP > 0) {
+            const bz = bossObj.position.z;
+            if (bz < 0 && bz > -50 && -bz < bestDist) {
+                best = { type: 'boss' };
             }
         }
 
-        return bestTarget;
+        return best;
     }
 
-    function fireFromArmy(dt) {
+    function fireBullets(dt) {
         fireCooldown -= dt;
-        if (fireCooldown > 0) return;
+        if (fireCooldown > 0 || runners.length === 0) return;
 
-        const target = findShootTarget();
+        const target = findTarget();
         if (!target) return;
 
-        // Fire rate scales with army size
-        const shotsPerSecond = Math.min(2 + playerNum * 0.5, 20);
-        fireCooldown = 1 / shotsPerSecond;
+        const shotsPerSec = Math.min(3 + crowdCount * 0.4, 15);
+        fireCooldown = 1 / shotsPerSec;
 
-        const px = playerScreenX();
-        const py = playerScreenY();
-
-        // Pick a random stickman to fire from
-        const count = Math.min(Math.ceil(playerNum / 3), 5); // bullets per volley
+        const count = Math.min(Math.ceil(crowdCount / 4), 4);
         for (let i = 0; i < count; i++) {
-            const sm = stickmen[Math.floor(Math.random() * stickmen.length)];
-            if (!sm) continue;
+            const r = runners[Math.floor(Math.random() * runners.length)];
+            if (!r) continue;
 
-            const spread = 1 + stickmen.length * 0.01;
-            const sx = px + sm.ox * spread;
-            const sy = py + sm.oy * 0.5 - 15;
+            const bullet = new THREE.Mesh(GEO.bullet, MAT.bullet);
+            bullet.position.copy(r.position);
+            bullet.position.y += 0.8;
 
-            // Aim at target
-            const tx = target.type === 'group'
-                ? TRACK_L + TRACK_W / 2 + (Math.random() - 0.5) * TRACK_W * 0.4
-                : TRACK_L + TRACK_W / 2;
-            const ty = target.wy;
+            let targetPos;
+            if (target.type === 'enemy') {
+                const alive = target.eg.units.filter(u => !u.userData.dead);
+                if (alive.length > 0) {
+                    const t = alive[Math.floor(Math.random() * alive.length)];
+                    targetPos = t.position.clone();
+                } else continue;
+            } else if (target.type === 'wall') {
+                targetPos = target.wall.group.position.clone();
+                targetPos.y = 1.5;
+                targetPos.x += (Math.random() - 0.5) * 4;
+            } else {
+                targetPos = bossObj.position.clone();
+                targetPos.y = 2.5;
+                targetPos.x += (Math.random() - 0.5) * 4;
+            }
 
-            const dx = tx - sx;
-            const dy = ty - sy;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const speed = 600;
-            const spread2 = 0.05;
+            const dir = targetPos.sub(bullet.position).normalize();
+            bullet.userData = {
+                vel: dir.multiplyScalar(50),
+                life: 1.5,
+                target: target.type,
+            };
 
-            bullets.push({
-                x: sx,
-                y: sy,
-                vx: (dx / dist + (Math.random() - 0.5) * spread2) * speed,
-                vy: (dy / dist + (Math.random() - 0.5) * spread2) * speed,
-                life: 2,
-                trail: [],
-            });
+            scene.add(bullet);
+            bullets3d.push(bullet);
 
-            // Muzzle flash
-            muzzleFlashes.push({
-                x: sx, y: sy - 5,
-                life: 0.08,
-                size: 4 + Math.random() * 3,
-            });
+            if (Math.random() < 0.3) SFX.shoot();
         }
     }
 
     function updateBullets(dt) {
-        for (let i = bullets.length - 1; i >= 0; i--) {
-            const b = bullets[i];
-            b.trail.push({ x: b.x, y: b.y });
-            if (b.trail.length > 4) b.trail.shift();
+        for (let i = bullets3d.length - 1; i >= 0; i--) {
+            const b = bullets3d[i];
+            b.position.add(b.userData.vel.clone().multiplyScalar(dt));
+            b.userData.life -= dt;
 
-            b.x += b.vx * dt;
-            b.y += b.vy * dt;
-            b.life -= dt;
-
-            if (b.life <= 0 || b.y < -50) {
-                bullets.splice(i, 1);
+            if (b.userData.life <= 0) {
+                scene.remove(b);
+                bullets3d.splice(i, 1);
                 continue;
             }
 
-            // Hit enemy groups
             let hit = false;
-            for (const eg of enemyGroups) {
-                const wy = screenYOf(eg.y);
-                for (const enemy of eg.enemies) {
-                    if (!enemy.alive) continue;
-                    const ex = TRACK_L + TRACK_W / 2 + enemy.ox;
-                    const ey = wy + enemy.oy;
-                    if (Math.abs(b.x - ex) < 15 && Math.abs(b.y - ey) < 20) {
-                        enemy.hp--;
-                        if (enemy.hp <= 0) {
-                            enemy.alive = false;
-                            // Damage the wall
-                            const wall = obstacles[eg.wallIndex];
-                            if (wall && !wall.smashed) {
-                                const dmg = 1 + Math.floor(playerNum * 0.1);
-                                wall.hp -= dmg;
-                                wall.hitFlash = 0.1;
-                                if (wall.hp <= 0) {
-                                    wall.hp = 0;
-                                    wall.smashed = true;
-                                    score += wall.maxHp * 10;
-                                    spawnBurst(TRACK_L + TRACK_W / 2, wy, 30, '#ff7675');
-                                    spawnWallDebris(TRACK_L + TRACK_W / 2, wy, wall.w);
-                                    shake(10);
-                                    spawnFloating(TRACK_L + TRACK_W / 2, wy, '+' + wall.maxHp * 10, '#feca57', 28);
-                                }
+
+            // Check enemy hits
+            for (const eg of enemies) {
+                if (eg.alive <= 0) continue;
+                for (const u of eg.units) {
+                    if (u.userData.dead) continue;
+                    if (b.position.distanceTo(u.position) < 0.8) {
+                        u.userData.dead = true;
+                        scene.remove(u);
+                        eg.alive--;
+                        updateSpriteText(eg.countSprite, eg.alive.toString(), '#ff6666');
+
+                        spawnParticles(u.position, 0xcc2222, 5);
+                        SFX.hit();
+
+                        // Damage associated wall
+                        if (eg.wallIndex >= 0 && eg.wallIndex < walls.length) {
+                            const w = walls[eg.wallIndex];
+                            if (!w.smashed) {
+                                w.hp = Math.max(0, w.hp - 1);
+                                updateSpriteText(w.sprite, w.hp.toString(), '#ffffff');
+                                if (w.hp <= 0) smashWall(w);
                             }
-                            spawnBurst(ex, ey, 8, enemy.color);
                         }
-                        spawnBurst(b.x, b.y, 3, C.bullet);
                         hit = true;
                         break;
                     }
@@ -358,898 +681,429 @@
                 if (hit) break;
             }
 
-            // Hit walls directly
+            // Check wall hits
             if (!hit) {
-                for (const wall of obstacles) {
-                    if (wall.smashed) continue;
-                    const wy = screenYOf(wall.y);
-                    const wx = TRACK_L + (TRACK_W - wall.w) / 2;
-                    if (b.x > wx && b.x < wx + wall.w &&
-                        b.y > wy - wall.h / 2 && b.y < wy + wall.h / 2) {
-                        wall.hp -= 1;
-                        wall.hitFlash = 0.08;
-                        if (wall.hp <= 0) {
-                            wall.hp = 0;
-                            wall.smashed = true;
-                            score += wall.maxHp * 10;
-                            spawnBurst(TRACK_L + TRACK_W / 2, wy, 30, '#ff7675');
-                            spawnWallDebris(TRACK_L + TRACK_W / 2, wy, wall.w);
-                            shake(10);
-                            spawnFloating(TRACK_L + TRACK_W / 2, wy, '+' + wall.maxHp * 10, '#feca57', 28);
-                        }
-                        spawnBurst(b.x, b.y, 2, '#ff6');
+                for (const w of walls) {
+                    if (w.smashed) continue;
+                    const wp = w.group.position;
+                    if (Math.abs(b.position.z - wp.z) < 1 &&
+                        Math.abs(b.position.x - wp.x) < 4 &&
+                        b.position.y < 4) {
+                        w.hp = Math.max(0, w.hp - 1);
+                        updateSpriteText(w.sprite, w.hp.toString(), '#ffffff');
+                        spawnParticles(b.position, 0xcc4444, 3);
+                        if (w.hp <= 0) smashWall(w);
                         hit = true;
                         break;
                     }
                 }
             }
 
-            // Hit boss
-            if (!hit && boss && !boss.smashed) {
-                const by = screenYOf(boss.y);
-                const bx = TRACK_L + (TRACK_W - boss.w) / 2;
-                if (b.x > bx && b.x < bx + boss.w &&
-                    b.y > by - boss.h / 2 && b.y < by + boss.h / 2) {
-                    boss.hp -= 1;
-                    boss.hitFlash = 0.06;
-                    spawnBurst(b.x, b.y, 2, '#feca57');
-                    hit = true;
-                    if (boss.hp <= 0) {
-                        boss.hp = 0;
-                        boss.smashed = true;
-                        score += boss.maxHp * 20;
-                        spawnConfetti(W / 2, by, 100);
-                        spawnWallDebris(TRACK_L + TRACK_W / 2, by, boss.w);
-                        shake(20);
-                        gameState = 'levelcomplete';
-                        setTimeout(() => { level++; startLevel(); }, 2500);
+            // Check boss hits
+            if (!hit && bossObj && bossHP > 0) {
+                const bp = bossObj.position;
+                if (Math.abs(b.position.z - bp.z) < 1.5 &&
+                    Math.abs(b.position.x - bp.x) < 5 &&
+                    b.position.y < 6) {
+                    bossHP = Math.max(0, bossHP - 1);
+                    updateSpriteText(bossObj.userData.hpSprite, Math.ceil(bossHP).toString(), '#ffffff');
+                    spawnParticles(b.position, 0xfeca57, 3);
+                    SFX.bossHit();
+                    if (bossHP <= 0) {
+                        defeatBoss();
                     }
+                    hit = true;
                 }
             }
 
             if (hit) {
-                bullets.splice(i, 1);
+                scene.remove(b);
+                bullets3d.splice(i, 1);
             }
         }
     }
 
-    // ─── Particles & Effects ────────────────────────────────────────
-    function spawnBurst(x, y, count, color) {
-        for (let i = 0; i < count; i++) {
-            const a = Math.random() * Math.PI * 2;
-            const spd = 1.5 + Math.random() * 4;
-            particles.push({
-                x, y,
-                vx: Math.cos(a) * spd,
-                vy: Math.sin(a) * spd - 1.5,
-                life: 30 + Math.random() * 25,
-                maxLife: 55,
-                r: 2 + Math.random() * 4,
-                color,
-            });
-        }
-    }
+    function smashWall(w) {
+        w.smashed = true;
+        score += w.maxHp * 10;
+        spawnParticles(w.group.position.clone().setY(1.5), 0xcc4444, 20);
+        SFX.wallBreak();
+        shake(0.3);
 
-    function spawnWallDebris(x, y, wallW) {
-        const colors = ['#c0392b', '#e74c3c', '#d35400', '#e67e22', '#795548'];
-        for (let i = 0; i < 20; i++) {
-            const a = -Math.PI * 0.8 + Math.random() * Math.PI * 0.6;
-            const spd = 3 + Math.random() * 7;
-            particles.push({
-                x: x + (Math.random() - 0.5) * wallW,
-                y: y + (Math.random() - 0.5) * 30,
-                vx: Math.cos(a) * spd,
-                vy: Math.sin(a) * spd - 3,
-                life: 40 + Math.random() * 30,
-                maxLife: 70,
-                r: 4 + Math.random() * 6,
-                color: colors[Math.floor(Math.random() * colors.length)],
-                debris: true,
-            });
-        }
-    }
-
-    function spawnConfetti(x, y, count) {
-        const colors = ['#ff6b9d', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#00d2d3', '#ff6348', '#a29bfe'];
-        for (let i = 0; i < count; i++) {
-            const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.2;
-            const spd = 4 + Math.random() * 8;
-            particles.push({
-                x: x + (Math.random() - 0.5) * 100,
-                y,
-                vx: Math.cos(a) * spd,
-                vy: Math.sin(a) * spd,
-                life: 80 + Math.random() * 50,
-                maxLife: 130,
-                r: 3 + Math.random() * 4,
-                color: colors[Math.floor(Math.random() * colors.length)],
-                confetti: true,
-                rot: Math.random() * Math.PI * 2,
-                rotSpd: (Math.random() - 0.5) * 0.3,
-            });
-        }
-    }
-
-    function spawnFloating(x, y, text, color, size) {
-        floatingTexts.push({
-            x, y, text,
-            color: color || '#333',
-            size: size || 28,
-            life: 50, maxLife: 50,
+        // Animate wall falling apart
+        w.group.children.forEach(child => {
+            if (child.isMesh && child.geometry === GEO.wallBlock) {
+                const vx = (Math.random() - 0.5) * 8;
+                const vy = 3 + Math.random() * 5;
+                const vz = (Math.random() - 0.5) * 4;
+                animateDebris(child, w.group, vx, vy, vz);
+            }
         });
+
+        setTimeout(() => { scene.remove(w.group); }, 1500);
     }
 
-    function shake(mag) { shakeMag = Math.max(shakeMag, mag); }
+    function animateDebris(mesh, parent, vx, vy, vz) {
+        const worldPos = new THREE.Vector3();
+        mesh.getWorldPosition(worldPos);
+        parent.remove(mesh);
+        mesh.position.copy(worldPos);
+        scene.add(mesh);
 
-    // ─── Coordinate helpers ─────────────────────────────────────────
-    function screenYOf(worldY) { return H * 0.72 + (worldY + scrollY); }
-    function playerScreenX() { return TRACK_L + TRACK_W / 2 + playerX * (TRACK_W * 0.28); }
-    function playerScreenY() { return H * 0.72; }
-
-    // ─── Update ─────────────────────────────────────────────────────
-    function update(dt) {
-        if (gameState === 'menu' || gameState === 'gameover') return;
-
-        playerX += (targetX - playerX) * Math.min(1, dt * 12);
-
-        if (gameState === 'playing') {
-            const speed = 160 + level * 8;
-            scrollY += speed * dt;
-
-            progressFill.style.width = (Math.min(scrollY / levelLength, 1) * 100) + '%';
-
-            // Shooting
-            fireFromArmy(dt);
-            updateBullets(dt);
-
-            // Gate collisions
-            const psy = playerScreenY();
-            for (const gp of gatePairs) {
-                if (gp.collected) continue;
-                const gy = screenYOf(gp.y);
-                if (Math.abs(gy - psy) < 40) {
-                    gp.collected = true;
-                    const side = playerX < 0 ? 'left' : 'right';
-                    const gate = gp[side];
-                    const diff = applyGate(gate);
-                    const gx = side === 'left'
-                        ? TRACK_L + LANE_W * 0.5
-                        : TRACK_L + LANE_W * 1.5;
-
-                    if (diff > 0) {
-                        spawnBurst(gx, gy, 25, '#00b894');
-                        spawnFloating(gx, gy - 50, '+' + diff, '#00b894', 36);
-                        shake(5);
-                    } else if (diff < 0) {
-                        spawnBurst(gx, gy, 12, '#e17055');
-                        spawnFloating(gx, gy - 50, '' + diff, '#e17055', 30);
-                        shake(7);
-                    }
-                    updateStickmen();
-                }
-            }
-
-            // Wall collisions (if not already shot down)
-            for (const wall of obstacles) {
-                if (wall.smashed) continue;
-                const wy = screenYOf(wall.y);
-                if (Math.abs(wy - psy) < 45) {
-                    playerNum -= wall.hp;
-                    wall.smashed = true;
-                    score += wall.maxHp * 5;
-                    spawnBurst(W / 2, wy, 25, '#ff7675');
-                    spawnWallDebris(W / 2, wy, wall.w);
-                    shake(12);
-
-                    if (playerNum <= 0) {
-                        playerNum = 0;
-                        doGameOver();
-                        return;
-                    }
-                    spawnFloating(W / 2, wy - 30, '-' + wall.hp, '#ff4444', 28);
-                    updateStickmen();
-                }
-            }
-
-            // Boss collision — enter smash mode if we reach it and it still has HP
-            if (boss && !boss.smashed) {
-                const by = screenYOf(boss.y);
-                if (by > psy - 80 && boss.hp > 0) {
-                    gameState = 'smashing';
-                    smashTimer = 0;
-                }
-            }
+        const startTime = Date.now();
+        function animStep() {
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed > 1.5) { scene.remove(mesh); return; }
+            mesh.position.x += vx * 0.016;
+            mesh.position.y += (vy - 9.8 * elapsed) * 0.016;
+            mesh.position.z += vz * 0.016;
+            mesh.rotation.x += 0.1;
+            mesh.rotation.z += 0.05;
+            requestAnimationFrame(animStep);
         }
-
-        if (gameState === 'smashing' && boss) {
-            smashTimer += dt;
-            // Still shooting at boss
-            fireFromArmy(dt);
-            updateBullets(dt);
-
-            // Also drain via contact
-            const drainRate = Math.max(boss.maxHp / 3, playerNum * 2);
-            const drain = drainRate * dt;
-            const actual = Math.min(drain, boss.hp, playerNum);
-
-            boss.hp -= actual;
-            playerNum -= actual * 0.5; // contact costs less than full
-            playerNum = Math.max(0, Math.round(playerNum));
-            boss.hp = Math.max(0, boss.hp);
-            boss.hitFlash = 0.05;
-
-            if (Math.random() < 0.6) {
-                const bx = TRACK_L + Math.random() * TRACK_W;
-                const by = screenYOf(boss.y);
-                spawnBurst(bx, by, 2, '#ff6348');
-            }
-            shake(3);
-
-            if (boss.hp <= 0) {
-                boss.smashed = true;
-                score += boss.maxHp * 20;
-                spawnConfetti(W / 2, screenYOf(boss.y), 100);
-                spawnWallDebris(W / 2, screenYOf(boss.y), boss.w);
-                shake(20);
-                gameState = 'levelcomplete';
-                setTimeout(() => { level++; startLevel(); }, 2500);
-            } else if (playerNum <= 0) {
-                doGameOver();
-                return;
-            }
-            updateStickmen();
-        }
-
-        // Muzzle flashes
-        for (let i = muzzleFlashes.length - 1; i >= 0; i--) {
-            muzzleFlashes[i].life -= dt;
-            if (muzzleFlashes[i].life <= 0) muzzleFlashes.splice(i, 1);
-        }
-
-        // Wall hit flashes
-        for (const wall of obstacles) wall.hitFlash = Math.max(0, wall.hitFlash - dt);
-        if (boss) boss.hitFlash = Math.max(0, boss.hitFlash - dt);
-
-        // Particles
-        for (let i = particles.length - 1; i >= 0; i--) {
-            const p = particles[i];
-            p.x += p.vx * dt * 60;
-            p.y += p.vy * dt * 60;
-            p.vy += (p.confetti ? 0.12 : p.debris ? 0.15 : 0.04) * dt * 60;
-            p.vx *= p.debris ? 0.97 : 0.98;
-            if (p.rot !== undefined) p.rot += p.rotSpd;
-            p.life -= dt * 60;
-            if (p.life <= 0) particles.splice(i, 1);
-        }
-
-        for (let i = floatingTexts.length - 1; i >= 0; i--) {
-            const ft = floatingTexts[i];
-            ft.y -= 1.2 * dt * 60;
-            ft.life -= dt * 60;
-            if (ft.life <= 0) floatingTexts.splice(i, 1);
-        }
-
-        shakeMag *= 0.85;
-        if (shakeMag < 0.3) shakeMag = 0;
-        shakeX = (Math.random() - 0.5) * shakeMag * 2;
-        shakeY = (Math.random() - 0.5) * shakeMag * 2;
+        animStep();
     }
 
-    // ─── Drawing ────────────────────────────────────────────────────
-    function draw() {
-        ctx.save();
-        ctx.translate(shakeX, shakeY);
+    function defeatBoss() {
+        score += bossMaxHP * 20;
+        spawnParticles(bossObj.position.clone().setY(2.5), 0xfeca57, 40);
+        spawnParticles(bossObj.position.clone().setY(2.5), 0xff6b9d, 30);
+        shake(0.8);
+        SFX.levelComplete();
 
-        // Sky gradient
-        const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-        skyGrad.addColorStop(0, C.sky);
-        skyGrad.addColorStop(1, C.skyBottom);
-        ctx.fillStyle = skyGrad;
-        ctx.fillRect(0, 0, W, H);
+        showActionText('LEVEL COMPLETE!', '#51cf66');
 
-        // Grass
-        ctx.fillStyle = C.grass1;
-        ctx.fillRect(0, 0, TRACK_L, H);
-        ctx.fillRect(TRACK_R, 0, W - TRACK_R, H);
+        // Slow-mo
+        timescaleTarget = 0.3;
+        setTimeout(() => { timescaleTarget = 1; }, 800);
 
-        // Grass stripes (scrolling)
-        ctx.fillStyle = C.grassStripe;
-        for (let y = ((scrollY * 0.6) % 50) - 50; y < H; y += 50) {
-            ctx.fillRect(0, y, TRACK_L, 25);
-            ctx.fillRect(TRACK_R, y, W - TRACK_R, 25);
-        }
-
-        // Track
-        const trackGrad = ctx.createLinearGradient(TRACK_L, 0, TRACK_R, 0);
-        trackGrad.addColorStop(0, '#d8d8d8');
-        trackGrad.addColorStop(0.2, '#e8e8e8');
-        trackGrad.addColorStop(0.8, '#e8e8e8');
-        trackGrad.addColorStop(1, '#d8d8d8');
-        ctx.fillStyle = trackGrad;
-        ctx.fillRect(TRACK_L, 0, TRACK_W, H);
-
-        // Center dashes
-        ctx.strokeStyle = '#ccc';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([25, 20]);
-        ctx.lineDashOffset = -(scrollY % 45);
-        ctx.beginPath();
-        ctx.moveTo(TRACK_L + TRACK_W / 2, 0);
-        ctx.lineTo(TRACK_L + TRACK_W / 2, H);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Track edges
-        ctx.fillStyle = '#bbb';
-        ctx.fillRect(TRACK_L - 3, 0, 3, H);
-        ctx.fillRect(TRACK_R, 0, 3, H);
-
-        if (gameState === 'menu') { ctx.restore(); return; }
-
-        // Gates
-        for (const gp of gatePairs) {
-            if (gp.collected) continue;
-            const gy = screenYOf(gp.y);
-            if (gy < -100 || gy > H + 100) continue;
-            drawGatePair(gp, gy);
-        }
-
-        // Enemy groups
-        for (const eg of enemyGroups) {
-            const wall = obstacles[eg.wallIndex];
-            if (wall && wall.smashed) continue;
-            const wy = screenYOf(eg.y);
-            if (wy < -150 || wy > H + 150) continue;
-            drawEnemyGroup(eg, wy);
-        }
-
-        // Walls
-        for (const wall of obstacles) {
-            if (wall.smashed) continue;
-            const wy = screenYOf(wall.y);
-            if (wy < -100 || wy > H + 100) continue;
-            drawWall(wall, wy);
-        }
-
-        // Boss
-        if (boss && !boss.smashed) {
-            const by = screenYOf(boss.y);
-            if (by > -200 && by < H + 200) drawBoss(boss, by);
-        }
-
-        // Bullet trails and bullets
-        for (const b of bullets) {
-            // Trail
-            if (b.trail.length > 1) {
-                ctx.strokeStyle = 'rgba(254, 202, 87, 0.3)';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(b.trail[0].x, b.trail[0].y);
-                for (let t = 1; t < b.trail.length; t++) {
-                    ctx.lineTo(b.trail[t].x, b.trail[t].y);
-                }
-                ctx.lineTo(b.x, b.y);
-                ctx.stroke();
-            }
-
-            // Bullet
-            ctx.fillStyle = C.bullet;
-            ctx.shadowColor = C.bulletGlow;
-            ctx.shadowBlur = 6;
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.shadowBlur = 0;
-        }
-
-        // Muzzle flashes
-        for (const mf of muzzleFlashes) {
-            const alpha = mf.life / 0.08;
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = C.muzzle;
-            ctx.beginPath();
-            ctx.arc(mf.x, mf.y, mf.size * alpha, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-
-        // Particles
-        for (const p of particles) {
-            const alpha = Math.max(0, p.life / p.maxLife);
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = p.color;
-            if (p.confetti) {
-                ctx.save();
-                ctx.translate(p.x, p.y);
-                ctx.rotate(p.rot || 0);
-                ctx.fillRect(-p.r / 2, -p.r * 0.3, p.r, p.r * 0.6);
-                ctx.restore();
-            } else if (p.debris) {
-                ctx.fillRect(p.x - p.r / 2, p.y - p.r / 2, p.r, p.r);
-            } else {
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.r * alpha, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-        ctx.globalAlpha = 1;
-
-        // Player army
-        drawPlayerArmy();
-
-        // Floating texts
-        for (const ft of floatingTexts) {
-            const alpha = ft.life / ft.maxLife;
-            const scale = 1 + (1 - alpha) * 0.3;
-            ctx.globalAlpha = alpha;
-            ctx.font = 'bold ' + Math.round(ft.size * scale) + 'px system-ui';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            // Outline
-            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-            ctx.lineWidth = 3;
-            ctx.strokeText(ft.text, ft.x, ft.y);
-            ctx.fillStyle = ft.color;
-            ctx.fillText(ft.text, ft.x, ft.y);
-        }
-        ctx.globalAlpha = 1;
-
-        // Level complete
-        if (gameState === 'levelcomplete') {
-            const bounce = Math.sin(Date.now() * 0.008) * 5;
-            ctx.font = 'bold 44px system-ui';
-            ctx.textAlign = 'center';
-            ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-            ctx.lineWidth = 4;
-            ctx.strokeText('LEVEL COMPLETE!', W / 2, H * 0.33 + bounce);
-            ctx.fillStyle = '#4ecdc4';
-            ctx.fillText('LEVEL COMPLETE!', W / 2, H * 0.33 + bounce);
-
-            ctx.font = 'bold 24px system-ui';
-            ctx.fillStyle = '#feca57';
-            ctx.fillText('Score: ' + score, W / 2, H * 0.33 + 45 + bounce);
-        }
-
-        ctx.restore();
+        state = 'complete';
+        setTimeout(() => {
+            level++;
+            startLevel();
+        }, 2500);
     }
 
-    function drawGatePair(gp, gy) {
-        const gateH = 70;
-        const gap = 5;
-
-        // Pillars on the sides
-        ctx.fillStyle = '#999';
-        ctx.fillRect(TRACK_L - 2, gy - gateH / 2 - 10, 6, gateH + 20);
-        ctx.fillRect(TRACK_R - 4, gy - gateH / 2 - 10, 6, gateH + 20);
-        ctx.fillRect(TRACK_L + TRACK_W / 2 - 3, gy - gateH / 2 - 10, 6, gateH + 20);
-
-        drawSingleGate(TRACK_L + gap, gy - gateH / 2, LANE_W - gap * 1.5, gateH, gp.left);
-        drawSingleGate(TRACK_L + LANE_W + gap * 0.5, gy - gateH / 2, LANE_W - gap * 1.5, gateH, gp.right);
-    }
-
-    function drawSingleGate(x, y, w, h, gate) {
-        const isGood = gate.op === '+' || gate.op === 'x';
-        const isGreat = gate.op === 'x' && gate.val >= 3;
-        const color = isGreat ? C.gateGreat : isGood ? C.gateGood : C.gateBad;
-
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.1)';
-        roundRect(x + 3, y + 3, w, h, 14);
-        ctx.fill();
-
-        // Body gradient
-        const grad = ctx.createLinearGradient(x, y, x, y + h);
-        grad.addColorStop(0, lighten(color, 20));
-        grad.addColorStop(1, color);
-        ctx.fillStyle = grad;
-        roundRect(x, y, w, h, 14);
-        ctx.fill();
-
-        // Shine
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        roundRect(x + 6, y + 4, w - 12, h * 0.35, 10);
-        ctx.fill();
-
-        // Border
-        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-        ctx.lineWidth = 2;
-        roundRect(x, y, w, h, 14);
-        ctx.stroke();
-
-        // Text with shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        ctx.font = 'bold 30px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(gate.label, x + w / 2 + 1, y + h / 2 + 2);
-        ctx.fillStyle = C.gateText;
-        ctx.fillText(gate.label, x + w / 2, y + h / 2);
-    }
-
-    function drawWall(wall, wy) {
-        const x = TRACK_L + (TRACK_W - wall.w) / 2;
-        const flash = wall.hitFlash > 0;
-
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.12)';
-        roundRect(x + 4, wy - wall.h / 2 + 4, wall.w, wall.h, 10);
-        ctx.fill();
-
-        // Body
-        const grad = ctx.createLinearGradient(x, wy - wall.h / 2, x, wy + wall.h / 2);
-        grad.addColorStop(0, flash ? '#ff9999' : '#e74c3c');
-        grad.addColorStop(1, flash ? '#ff7777' : C.wallDark);
-        ctx.fillStyle = grad;
-        roundRect(x, wy - wall.h / 2, wall.w, wall.h, 10);
-        ctx.fill();
-
-        // Brick lines
-        ctx.strokeStyle = 'rgba(0,0,0,0.1)';
-        ctx.lineWidth = 1;
-        const brickH = wall.h / 3;
-        for (let row = 0; row < 3; row++) {
-            const by = wy - wall.h / 2 + row * brickH;
-            ctx.beginPath();
-            ctx.moveTo(x + 10, by);
-            ctx.lineTo(x + wall.w - 10, by);
-            ctx.stroke();
-            const offset = row % 2 === 0 ? 0 : wall.w / 4;
-            for (let col = 0; col < 4; col++) {
-                const bx = x + offset + col * (wall.w / 4);
-                if (bx > x && bx < x + wall.w) {
-                    ctx.beginPath();
-                    ctx.moveTo(bx, by);
-                    ctx.lineTo(bx, by + brickH);
-                    ctx.stroke();
-                }
-            }
-        }
-
-        // HP bar
-        const ratio = wall.hp / wall.maxHp;
-        const barW = wall.w - 20;
-        const barH = 6;
-        const barY = wy + wall.h / 2 + 6;
-        ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        roundRect(x + 10, barY, barW, barH, 3);
-        ctx.fill();
-        ctx.fillStyle = ratio > 0.5 ? '#e74c3c' : ratio > 0.2 ? '#e67e22' : '#f1c40f';
-        roundRect(x + 10, barY, barW * ratio, barH, 3);
-        ctx.fill();
-
-        // Number
-        ctx.font = 'bold 28px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        ctx.fillText(wall.hp, TRACK_L + TRACK_W / 2 + 1, wy + 1);
-        ctx.fillStyle = C.wallText;
-        ctx.fillText(wall.hp, TRACK_L + TRACK_W / 2, wy);
-    }
-
-    function drawEnemyGroup(eg, wy) {
-        const cx = TRACK_L + TRACK_W / 2;
-        const t = Date.now() * 0.004;
-
-        for (const e of eg.enemies) {
-            if (!e.alive) continue;
-            const ex = cx + e.ox;
-            const ey = wy + e.oy;
-            const bob = Math.sin(t + e.phase) * 1.5;
-
-            // Head
-            ctx.fillStyle = e.skin;
-            ctx.beginPath();
-            ctx.arc(ex, ey - 8 + bob, 5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-
-            // Angry eyes
-            ctx.fillStyle = '#c0392b';
-            ctx.fillRect(ex - 3, ey - 10 + bob, 2, 2);
-            ctx.fillRect(ex + 1, ey - 10 + bob, 2, 2);
-
-            // Body
-            ctx.fillStyle = e.color;
-            ctx.fillRect(ex - 4, ey - 3 + bob, 8, 10);
-
-            // Legs
-            ctx.strokeStyle = e.color;
-            ctx.lineWidth = 2;
-            const legPhase = Math.sin(t * 2 + e.phase);
-            ctx.beginPath();
-            ctx.moveTo(ex - 2, ey + 7 + bob);
-            ctx.lineTo(ex - 3 - legPhase, ey + 14 + bob);
-            ctx.moveTo(ex + 2, ey + 7 + bob);
-            ctx.lineTo(ex + 3 + legPhase, ey + 14 + bob);
-            ctx.stroke();
-
-            // Small weapon
-            ctx.strokeStyle = '#555';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(ex + 4, ey - 1 + bob);
-            ctx.lineTo(ex + 10, ey - 4 + bob);
-            ctx.stroke();
-        }
-    }
-
-    function drawBoss(b, by) {
-        const x = TRACK_L + (TRACK_W - b.w) / 2;
-        const flash = b.hitFlash > 0;
-        const pulse = Math.sin(Date.now() * 0.006) * 3;
-
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        roundRect(x + 6, by - b.h / 2 + 6, b.w, b.h, 16);
-        ctx.fill();
-
-        // Body
-        const grad = ctx.createLinearGradient(x, by - b.h / 2, x, by + b.h / 2);
-        grad.addColorStop(0, flash ? '#ff5555' : '#c0392b');
-        grad.addColorStop(1, flash ? '#cc3333' : C.bossWall);
-        ctx.fillStyle = grad;
-        roundRect(x, by - b.h / 2, b.w, b.h, 16);
-        ctx.fill();
-
-        // Skull face
-        const faceY = by - 10;
-        const faceX = TRACK_L + TRACK_W / 2;
-
-        // Eyes (glowing)
-        ctx.fillStyle = '#feca57';
-        ctx.shadowColor = '#feca57';
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.arc(faceX - 18, faceY - 5, 8 + pulse * 0.3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(faceX + 18, faceY - 5, 8 + pulse * 0.3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        // Eye pupils
-        ctx.fillStyle = '#2d3436';
-        ctx.beginPath();
-        ctx.arc(faceX - 18, faceY - 5, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(faceX + 18, faceY - 5, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Angry brows
-        ctx.strokeStyle = '#2d3436';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(faceX - 28, faceY - 16);
-        ctx.lineTo(faceX - 10, faceY - 12);
-        ctx.moveTo(faceX + 28, faceY - 16);
-        ctx.lineTo(faceX + 10, faceY - 12);
-        ctx.stroke();
-
-        // Mouth (jagged)
-        ctx.strokeStyle = '#2d3436';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(faceX - 20, faceY + 10);
-        for (let i = 0; i < 8; i++) {
-            ctx.lineTo(faceX - 20 + i * 5, faceY + 10 + (i % 2 === 0 ? 5 : 0));
-        }
-        ctx.stroke();
-
-        // BOSS label
-        ctx.font = 'bold 14px system-ui';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText('BOSS', faceX, by - b.h / 2 + 14);
-
-        // HP bar
-        const ratio = b.hp / b.maxHp;
-        const barW = b.w - 30;
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        roundRect(x + 15, by + b.h / 2 - 22, barW, 10, 5);
-        ctx.fill();
-        const hpColor = ratio > 0.5 ? '#e74c3c' : ratio > 0.2 ? '#e67e22' : '#f1c40f';
-        ctx.fillStyle = hpColor;
-        roundRect(x + 15, by + b.h / 2 - 22, barW * ratio, 10, 5);
-        ctx.fill();
-
-        // HP Number
-        ctx.font = 'bold 32px system-ui';
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 3;
-        ctx.strokeText(Math.ceil(b.hp), faceX, by + 35);
-        ctx.fillText(Math.ceil(b.hp), faceX, by + 35);
-    }
-
-    function drawPlayerArmy() {
-        const px = playerScreenX();
-        const py = playerScreenY();
-        const t = Date.now() * 0.004;
-        const count = stickmen.length;
-        const spread = 1 + count * 0.012;
-
-        // Draw circle base (shadow of army)
-        if (count > 1) {
-            ctx.fillStyle = 'rgba(0,0,0,0.06)';
-            ctx.beginPath();
-            ctx.ellipse(px, py + 12, 20 + count * 1.2, 10 + count * 0.3, 0, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
+    // ─── Particles ──────────────────────────────────────────────────
+    function spawnParticles(pos, color, count) {
         for (let i = 0; i < count; i++) {
-            const s = stickmen[i];
-            const sx = px + s.ox * spread;
-            const sy = py + s.oy * spread * 0.6;
-            const bob = Math.sin(t + s.phase) * 2;
-            const legPhase = Math.sin(t * 3 + s.phase);
+            const geo = new THREE.SphereGeometry(0.08 + Math.random() * 0.1, 4, 4);
+            const mat = new THREE.MeshBasicMaterial({ color });
+            const p = new THREE.Mesh(geo, mat);
+            p.position.copy(pos);
+            p.userData = {
+                vel: new THREE.Vector3(
+                    (Math.random() - 0.5) * 6,
+                    2 + Math.random() * 5,
+                    (Math.random() - 0.5) * 6
+                ),
+                life: 0.6 + Math.random() * 0.4,
+            };
+            scene.add(p);
+            particles3d.push(p);
+        }
+    }
 
-            // Head
-            ctx.fillStyle = '#ffe0cc';
-            ctx.beginPath();
-            ctx.arc(sx, sy - 12 + bob, 5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
+    function updateParticles(dt) {
+        for (let i = particles3d.length - 1; i >= 0; i--) {
+            const p = particles3d[i];
+            p.position.add(p.userData.vel.clone().multiplyScalar(dt));
+            p.userData.vel.y -= 12 * dt;
+            p.userData.life -= dt;
+            p.material.opacity = Math.max(0, p.userData.life / 0.8);
+            p.material.transparent = true;
+            if (p.userData.life <= 0) {
+                scene.remove(p);
+                particles3d.splice(i, 1);
+            }
+        }
+    }
 
-            // Hair
-            ctx.fillStyle = s.color;
-            ctx.beginPath();
-            ctx.arc(sx, sy - 14 + bob, 5, Math.PI, Math.PI * 2);
-            ctx.fill();
+    // ─── Effects ────────────────────────────────────────────────────
+    function shake(amount) { shakeAmount = Math.max(shakeAmount, amount); }
 
-            // Body
-            ctx.fillStyle = s.color;
-            ctx.fillRect(sx - 4, sy - 7 + bob, 8, 11);
+    function showActionText(text, color) {
+        actionText.textContent = text;
+        actionText.style.color = color || '#fff';
+        actionText.classList.add('show');
+        setTimeout(() => actionText.classList.remove('show'), 1500);
+    }
 
-            // Gun arm
-            ctx.strokeStyle = '#666';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(sx + 3, sy - 4 + bob);
-            ctx.lineTo(sx + 10, sy - 10 + bob + Math.sin(t + s.phase) * 1);
-            ctx.stroke();
+    function updateHUD() {
+        countDisplay.textContent = Math.round(crowdCount);
+        levelDisplay.textContent = level;
+    }
 
-            // Gun
-            ctx.fillStyle = '#444';
-            ctx.fillRect(sx + 8, sy - 13 + bob, 6, 3);
+    // ─── Gate Logic ─────────────────────────────────────────────────
+    function applyGate(op) {
+        const old = crowdCount;
+        switch (op.op) {
+            case '+': crowdCount += op.val; break;
+            case '-': crowdCount = Math.max(1, crowdCount - op.val); break;
+            case 'x': crowdCount *= op.val; break;
+            case '/': crowdCount = Math.max(1, Math.ceil(crowdCount / op.val)); break;
+        }
+        crowdCount = Math.min(crowdCount, 999);
+        const diff = crowdCount - old;
 
-            // Legs
-            ctx.strokeStyle = s.color;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(sx - 2, sy + 4 + bob);
-            ctx.lineTo(sx - 3 - legPhase * 2, sy + 13 + bob);
-            ctx.moveTo(sx + 2, sy + 4 + bob);
-            ctx.lineTo(sx + 3 + legPhase * 2, sy + 13 + bob);
-            ctx.stroke();
-
-            // Shoes
-            ctx.fillStyle = '#2d3436';
-            ctx.fillRect(sx - 5 - legPhase * 2, sy + 12 + bob, 4, 2);
-            ctx.fillRect(sx + 1 + legPhase * 2, sy + 12 + bob, 4, 2);
+        if (diff > 0) {
+            if (op.op === 'x' && op.val >= 3) {
+                SFX.gateGreat();
+                showActionText(op.label + '!', '#a78bfa');
+                timescaleTarget = 0.4;
+                setTimeout(() => { timescaleTarget = 1; }, 200);
+                shake(0.4);
+            } else {
+                SFX.gateGood();
+                shake(0.15);
+            }
+            // Haptic
+            if (navigator.vibrate) navigator.vibrate(30);
+        } else {
+            SFX.gateBad();
+            shake(0.25);
+            if (navigator.vibrate) navigator.vibrate([20, 20, 40]);
         }
 
-        // Big number above army
-        const numSize = Math.min(52, 30 + count * 0.5);
-        ctx.font = 'bold ' + numSize + 'px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        updateRunners();
+        updateHUD();
 
-        // Glow
-        ctx.shadowColor = 'rgba(255,107,157,0.5)';
-        ctx.shadowBlur = 15;
-        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-        ctx.lineWidth = 4;
-        ctx.strokeText(Math.round(playerNum), px, py - 40);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(Math.round(playerNum), px, py - 40);
-        ctx.shadowBlur = 0;
+        // Number animation
+        countAnim.scale = 1.5;
+        countAnim.targetScale = 1;
 
-        // Inner color
-        ctx.font = 'bold ' + (numSize - 2) + 'px system-ui';
-        ctx.fillStyle = C.player;
-        ctx.fillText(Math.round(playerNum), px, py - 40);
+        return diff;
     }
 
-    // ─── Helpers ────────────────────────────────────────────────────
-    function roundRect(x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-    }
+    // ─── Main Update ────────────────────────────────────────────────
+    function update(dt) {
+        if (state === 'menu' || state === 'gameover') return;
 
-    function lighten(hex, pct) {
-        const num = parseInt(hex.replace('#', ''), 16);
-        const r = Math.min(255, ((num >> 16) & 0xFF) + pct);
-        const g = Math.min(255, ((num >> 8) & 0xFF) + pct);
-        const b = Math.min(255, (num & 0xFF) + pct);
-        return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+        // Timescale
+        timescale += (timescaleTarget - timescale) * Math.min(1, dt * 8);
+        dt *= timescale;
+
+        // Smooth crowd movement
+        crowdX += (targetX - crowdX) * 0.1;
+
+        if (state === 'running' || state === 'complete') {
+            // Move everything toward camera (world scrolls, player stays at z=0)
+            const moveZ = speed * dt * 60;
+
+            gates.forEach(g => g.group.position.z += moveZ);
+            walls.forEach(w => { if (!w.smashed) w.group.position.z += moveZ; });
+            enemies.forEach(eg => {
+                eg.units.forEach(u => { if (!u.userData.dead) u.position.z += moveZ; });
+                eg.countSprite.position.z += moveZ;
+            });
+            if (bossObj) bossObj.position.z += moveZ;
+
+            distance += moveZ;
+
+            // Progress
+            const prog = Math.min(distance / levelDist, 1);
+            progressFill.style.width = (prog * 100) + '%';
+
+            if (state === 'running') {
+                // Shooting
+                fireBullets(dt);
+                updateBullets(dt);
+
+                // Gate collisions
+                for (const g of gates) {
+                    if (g.passed) continue;
+                    if (g.group.position.z > -0.5 && g.group.position.z < 1) {
+                        g.passed = true;
+                        // Which side?
+                        const op = crowdX < 0 ? g.leftOp : g.rightOp;
+                        applyGate(op);
+                        // Fade out the gate
+                        g.group.visible = false;
+                    }
+                }
+
+                // Wall collisions (if player reaches wall that isn't smashed)
+                for (const w of walls) {
+                    if (w.smashed) continue;
+                    if (w.group.position.z > -0.5 && w.group.position.z < 1) {
+                        // Smash through — costs HP
+                        const damage = w.hp;
+                        crowdCount -= damage;
+                        w.smashed = true;
+                        smashWall(w);
+
+                        if (crowdCount <= 0) {
+                            crowdCount = 0;
+                            doGameOver();
+                            return;
+                        }
+                        updateRunners();
+                        updateHUD();
+                    }
+                }
+
+                // Boss collision
+                if (bossObj && bossHP > 0 && bossObj.position.z > -3) {
+                    state = 'smashing';
+                    battleTimer = 0;
+                }
+            }
+        }
+
+        if (state === 'smashing' && bossObj) {
+            battleTimer += dt;
+            fireBullets(dt);
+            updateBullets(dt);
+
+            // Contact drain
+            const drain = Math.max(bossMaxHP / 3, crowdCount * 2) * dt;
+            const actual = Math.min(drain, bossHP, crowdCount);
+            bossHP -= actual;
+            crowdCount -= actual * 0.3;
+            crowdCount = Math.max(0, Math.round(crowdCount));
+            bossHP = Math.max(0, bossHP);
+
+            updateSpriteText(bossObj.userData.hpSprite, Math.ceil(bossHP).toString(), '#ffffff');
+            updateRunners();
+            updateHUD();
+
+            if (Math.random() < 0.4) {
+                const bp = bossObj.position.clone();
+                bp.x += (Math.random() - 0.5) * 6;
+                bp.y = 1 + Math.random() * 3;
+                spawnParticles(bp, 0xff6348, 2);
+            }
+            shake(0.1);
+
+            if (bossHP <= 0) defeatBoss();
+            else if (crowdCount <= 0) doGameOver();
+        }
+
+        // Animate runners
+        const time = Date.now() * 0.01;
+        runners.forEach(r => {
+            const spread = 1 + runners.length * 0.008;
+            r.position.x = crowdX + r.userData.baseX * spread;
+            r.position.z = r.userData.baseZ * spread * 0.5;
+            r.position.y = Math.abs(Math.sin(time + r.userData.phase)) * 0.12;
+        });
+
+        // Animate enemy units
+        enemies.forEach(eg => {
+            eg.units.forEach(u => {
+                if (u.userData.dead) return;
+                u.position.y = Math.abs(Math.sin(time + u.userData.phase)) * 0.08;
+            });
+        });
+
+        // Boss pulse
+        if (bossObj && bossHP > 0) {
+            const pulse = Math.sin(Date.now() * 0.005) * 0.1;
+            bossObj.scale.setScalar(1 + pulse);
+        }
+
+        // Particles
+        updateParticles(dt);
+
+        // Camera shake
+        if (shakeAmount > 0.01) {
+            camera.position.x = (Math.random() - 0.5) * shakeAmount * 2;
+            camera.position.y = 10 + (Math.random() - 0.5) * shakeAmount;
+            shakeAmount *= 0.9;
+        } else {
+            camera.position.x = 0;
+            camera.position.y = 10;
+            shakeAmount = 0;
+        }
+
+        // Number animation
+        countAnim.scale += (countAnim.targetScale - countAnim.scale) * 0.15;
     }
 
     // ─── Input ──────────────────────────────────────────────────────
     let dragging = false;
-    let dragStartX = 0;
-    let dragPlayerStartX = 0;
+    let lastPointerX = 0;
 
-    function onDown(cx) { dragging = true; dragStartX = cx; dragPlayerStartX = playerX; }
-    function onMove(cx) {
+    function onDown(x) {
+        dragging = true;
+        lastPointerX = x;
+        ensureAudio();
+    }
+    function onMove(x) {
         if (!dragging) return;
-        const sensitivity = 2.5 / TRACK_W;
-        targetX = Math.max(-1, Math.min(1, dragPlayerStartX + (cx - dragStartX) * sensitivity));
+        const dx = x - lastPointerX;
+        lastPointerX = x;
+        targetX = Math.max(-4.5, Math.min(4.5, targetX + dx * 0.03));
     }
     function onUp() { dragging = false; }
 
-    canvas.addEventListener('mousedown', e => onDown(e.clientX));
-    canvas.addEventListener('mousemove', e => onMove(e.clientX));
-    canvas.addEventListener('mouseup', onUp);
-    canvas.addEventListener('mouseleave', onUp);
-    canvas.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
-    canvas.addEventListener('touchmove', e => { e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
-    canvas.addEventListener('touchend', e => { e.preventDefault(); onUp(); }, { passive: false });
+    document.addEventListener('mousedown', e => onDown(e.clientX));
+    document.addEventListener('mousemove', e => onMove(e.clientX));
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
+    document.addEventListener('touchmove', e => { e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
+    document.addEventListener('touchend', e => { e.preventDefault(); onUp(); }, { passive: false });
 
+    // Keyboard
     const keys = {};
     window.addEventListener('keydown', e => { keys[e.key] = true; });
     window.addEventListener('keyup', e => { keys[e.key] = false; });
-    function handleKeyboard(dt) {
-        const speed = 4 * dt;
-        if (keys['ArrowLeft'] || keys['a'] || keys['A']) targetX = Math.max(-1, targetX - speed);
-        if (keys['ArrowRight'] || keys['d'] || keys['D']) targetX = Math.min(1, targetX + speed);
-    }
 
     // ─── Game Lifecycle ─────────────────────────────────────────────
     function startLevel() {
-        gameState = 'playing';
-        targetX = 0; playerX = 0;
-        particles = []; floatingTexts = []; bullets = []; muzzleFlashes = []; stickmen = [];
-        fireCooldown = 0;
-
+        state = 'running';
         generateLevel(level);
-        updateStickmen();
+        initGround();
 
-        progressBar.style.display = 'block';
-        levelLabel.textContent = 'LEVEL ' + level;
+        hudEl.style.display = 'flex';
+        progressEl.style.display = 'block';
         progressFill.style.width = '0%';
         startScreen.classList.add('hidden');
-        gameOverScreen.classList.add('hidden');
+        startScreen.classList.remove('active');
+        gameoverScreen.classList.add('hidden');
+        gameoverScreen.classList.remove('active');
     }
 
-    function startGame() { level = 1; score = 0; startLevel(); }
+    function startGame() {
+        level = 1;
+        score = 0;
+        startLevel();
+    }
 
     function doGameOver() {
-        gameState = 'gameover';
-        progressBar.style.display = 'none';
-        gameOverTitle.textContent = 'GAME OVER';
-        gameOverTitle.className = '';
-        finalLevel.textContent = 'Level ' + level;
-        finalScore.textContent = 'Score: ' + score;
-        gameOverScreen.classList.remove('hidden');
+        state = 'gameover';
+        SFX.gameOver();
+        hudEl.style.display = 'none';
+        progressEl.style.display = 'none';
+        goTitle.textContent = 'GAME OVER';
+        goTitle.className = 'lose';
+        goLevel.textContent = level;
+        goScore.textContent = score;
+        gameoverScreen.classList.remove('hidden');
+        gameoverScreen.classList.add('active');
     }
 
-    // ─── Main Loop ──────────────────────────────────────────────────
+    // ─── Render Loop ────────────────────────────────────────────────
+    let lastTime = 0;
+
     function loop(timestamp) {
-        if (!lastTime) lastTime = timestamp;
-        const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+        const dt = Math.min((timestamp - (lastTime || timestamp)) / 1000, 0.05);
         lastTime = timestamp;
-        handleKeyboard(dt);
+
+        // Keyboard
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) targetX = Math.max(-4.5, targetX - 0.15);
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) targetX = Math.min(4.5, targetX + 0.15);
+
         update(dt);
-        draw();
+        renderer.render(scene, camera);
         requestAnimationFrame(loop);
     }
 
+    // ─── Init ───────────────────────────────────────────────────────
     document.getElementById('btn-start').addEventListener('click', startGame);
-    document.getElementById('btn-restart').addEventListener('click', startGame);
+    document.getElementById('btn-retry').addEventListener('click', startGame);
+
+    initRenderer();
+    initGround();
     requestAnimationFrame(loop);
 })();
