@@ -11,8 +11,8 @@
 
     function initRenderer() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x222233);
-        scene.fog = new THREE.Fog(0x222233, 30, 80);
+        scene.background = new THREE.Color(0x1a1520);
+        scene.fog = new THREE.FogExp2(0x1a1520, 0.018);
 
         // Behind-the-player camera looking forward down the road
         camera = new THREE.PerspectiveCamera(55, W() / H(), 0.1, 200);
@@ -24,27 +24,39 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
-        // Ambient
-        scene.add(new THREE.AmbientLight(0x667788, 0.5));
+        // Dim ambient — most light comes from fire/muzzle
+        scene.add(new THREE.AmbientLight(0x334455, 0.35));
 
-        // Main directional sun
-        const sun = new THREE.DirectionalLight(0xffeedd, 0.8);
+        // Main directional (moonlight feel)
+        const sun = new THREE.DirectionalLight(0x8899bb, 0.4);
         sun.position.set(5, 20, 10);
         sun.castShadow = true;
         sun.shadow.camera.left = -20;
         sun.shadow.camera.right = 20;
         sun.shadow.camera.top = 40;
         sun.shadow.camera.bottom = -10;
-        sun.shadow.mapSize.width = 1024;
-        sun.shadow.mapSize.height = 1024;
+        sun.shadow.mapSize.width = 2048;
+        sun.shadow.mapSize.height = 2048;
         scene.add(sun);
 
-        // Warm fire-colored point light at player
-        const pLight = new THREE.PointLight(0xff8844, 0.8, 25);
+        // Warm fire-colored point light at player (big radius)
+        const pLight = new THREE.PointLight(0xff6622, 1.2, 35);
         pLight.position.set(0, 3, 6);
         scene.add(pLight);
+
+        // Secondary fire glow down the road
+        const pLight2 = new THREE.PointLight(0xff4400, 0.6, 30);
+        pLight2.position.set(0, 2, -10);
+        scene.add(pLight2);
+
+        // Red rim from the far end (enemy side)
+        const farLight = new THREE.PointLight(0xff2200, 0.5, 50);
+        farLight.position.set(0, 5, -40);
+        scene.add(farLight);
 
         window.addEventListener('resize', () => {
             camera.aspect = W() / H();
@@ -190,8 +202,9 @@
         envMeshes.forEach(m => scene.remove(m));
         envMeshes = [];
 
-        // Road
-        const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 100), MAT.road);
+        // Road (darker, battle-worn)
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 100),
+            new THREE.MeshStandardMaterial({ color: 0x333340, roughness: 0.9 }));
         road.rotation.x = -Math.PI / 2;
         road.position.set(0, -0.01, -25);
         road.receiveShadow = true;
@@ -205,26 +218,87 @@
             scene.add(dash); envMeshes.push(dash);
         }
 
-        // Side walls
+        // Edge lines on road
         for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3, 100), MAT.wall);
-            wall.position.set(side * (ROAD_W / 2 + 0.25), 1.5, -25);
+            for (let z = 5; z > -70; z -= 2) {
+                const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 1.2),
+                    new THREE.MeshBasicMaterial({ color: 0x555560 }));
+                mark.rotation.x = -Math.PI / 2;
+                mark.position.set(side * (ROAD_W / 2 - 0.4), 0.01, z);
+                scene.add(mark); envMeshes.push(mark);
+            }
+        }
+
+        // Side walls (thicker, taller — industrial corridor)
+        for (const side of [-1, 1]) {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(1.0, 4.5, 100),
+                new THREE.MeshStandardMaterial({ color: 0x3a3a44, roughness: 0.85 }));
+            wall.position.set(side * (ROAD_W / 2 + 0.5), 2.25, -25);
             wall.castShadow = true;
             scene.add(wall); envMeshes.push(wall);
 
-            // Wall cap
-            const cap = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 100), MAT.wallTop);
-            cap.position.set(side * (ROAD_W / 2 + 0.25), 3, -25);
+            // Wall cap / ledge
+            const cap = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.2, 100),
+                new THREE.MeshStandardMaterial({ color: 0x555566 }));
+            cap.position.set(side * (ROAD_W / 2 + 0.5), 4.5, -25);
             scene.add(cap); envMeshes.push(cap);
+
+            // Wall buttresses every 8 units
+            for (let z = 0; z > -60; z -= 8) {
+                const buttress = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.5, 0.8),
+                    new THREE.MeshStandardMaterial({ color: 0x444450 }));
+                buttress.position.set(side * (ROAD_W / 2 + 0.05), 2.25, z);
+                buttress.castShadow = true;
+                scene.add(buttress); envMeshes.push(buttress);
+            }
         }
 
         // Ground beyond walls
         for (const side of [-1, 1]) {
             const gnd = new THREE.Mesh(new THREE.PlaneGeometry(30, 100),
-                new THREE.MeshStandardMaterial({ color: 0x333344 }));
+                new THREE.MeshStandardMaterial({ color: 0x222230 }));
             gnd.rotation.x = -Math.PI / 2;
             gnd.position.set(side * 19, -0.05, -25);
             scene.add(gnd); envMeshes.push(gnd);
+        }
+
+        // Rubble/debris on road
+        const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x555544 });
+        for (let i = 0; i < 25; i++) {
+            const s = 0.1 + Math.random() * 0.25;
+            const rubble = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.6, s), rubbleMat);
+            rubble.position.set(
+                (Math.random() - 0.5) * ROAD_W * 0.9,
+                s * 0.3,
+                -5 - Math.random() * 55
+            );
+            rubble.rotation.y = Math.random() * Math.PI;
+            rubble.rotation.z = Math.random() * 0.3;
+            scene.add(rubble); envMeshes.push(rubble);
+        }
+
+        // Barricade at defense line
+        const barricadeMat = new THREE.MeshStandardMaterial({ color: 0x665533, roughness: 0.9 });
+        for (let x = -ROAD_W / 2 + 0.5; x <= ROAD_W / 2 - 0.5; x += 1.8) {
+            const sandbag = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.35, 0.5), barricadeMat);
+            sandbag.position.set(x + (Math.random() - 0.5) * 0.3, 0.18, DEFENSE_Z + 2.5);
+            sandbag.rotation.y = (Math.random() - 0.5) * 0.15;
+            scene.add(sandbag); envMeshes.push(sandbag);
+        }
+        // Second row
+        for (let x = -ROAD_W / 2 + 1.2; x <= ROAD_W / 2 - 1.2; x += 2.0) {
+            const sandbag = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.3, 0.45), barricadeMat);
+            sandbag.position.set(x, 0.48, DEFENSE_Z + 2.5);
+            scene.add(sandbag); envMeshes.push(sandbag);
+        }
+
+        // Ambient fire barrels along walls (just orange point lights)
+        for (let z = -5; z > -50; z -= 12) {
+            for (const side of [-1, 1]) {
+                const fLight = new THREE.PointLight(0xff5500, 0.3, 8);
+                fLight.position.set(side * (ROAD_W / 2 - 0.3), 2, z);
+                scene.add(fLight); envMeshes.push(fLight);
+            }
         }
     }
 
@@ -373,33 +447,46 @@
 
     function createBarrelObj(type) {
         const g = new THREE.Group();
+        const colors = { squad: 0x44ff88, weapon: 0xff4444, coins: 0xffdd44 };
+        const col = colors[type];
 
-        // Crate body (like in the screenshot)
-        const crate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), MAT.crate);
-        crate.position.y = 0.6; crate.castShadow = true; g.add(crate);
+        // Crate body — bigger, chunkier (like screenshot)
+        const crateMat = new THREE.MeshStandardMaterial({ color: 0x5a4a30, roughness: 0.8 });
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), crateMat);
+        crate.position.y = 0.75; crate.castShadow = true; g.add(crate);
 
-        // Crate edges
-        const edgeGeo = new THREE.BoxGeometry(1.25, 0.08, 1.25);
-        for (const y of [0.05, 1.15]) {
-            const edge = new THREE.Mesh(edgeGeo, MAT.crateEdge);
+        // Metal edges/bands
+        const edgeMat = new THREE.MeshStandardMaterial({ color: 0x666655, metalness: 0.4 });
+        const edgeGeo = new THREE.BoxGeometry(1.55, 0.1, 1.55);
+        for (const y of [0.05, 0.75, 1.45]) {
+            const edge = new THREE.Mesh(edgeGeo, edgeMat);
             edge.position.y = y; g.add(edge);
         }
 
-        // Colored glow on top based on type
-        const colors = { squad: 0x44ff88, weapon: 0xff4444, coins: 0xffdd44 };
-        const glow = new THREE.Mesh(
-            new THREE.BoxGeometry(0.8, 0.05, 0.8),
-            new THREE.MeshBasicMaterial({ color: colors[type], transparent: true, opacity: 0.7 })
-        );
-        glow.position.y = 1.22; g.add(glow);
+        // Colored glowing panels on all 4 sides
+        const panelGeo = new THREE.BoxGeometry(1.0, 0.8, 0.06);
+        const panelMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5 });
+        for (let r = 0; r < 4; r++) {
+            const panel = new THREE.Mesh(panelGeo, panelMat);
+            panel.position.y = 0.75;
+            const angle = r * Math.PI / 2;
+            panel.position.x = Math.sin(angle) * 0.76;
+            panel.position.z = Math.cos(angle) * 0.76;
+            panel.rotation.y = angle;
+            g.add(panel);
+        }
 
-        // Side stripe color
-        const stripe = new THREE.Mesh(
-            new THREE.BoxGeometry(1.22, 0.3, 0.05),
-            new THREE.MeshBasicMaterial({ color: colors[type], transparent: true, opacity: 0.5 })
+        // Top glow
+        const glow = new THREE.Mesh(
+            new THREE.BoxGeometry(1.1, 0.06, 1.1),
+            new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.6 })
         );
-        stripe.position.set(0, 0.6, 0.61); g.add(stripe);
-        const stripe2 = stripe.clone(); stripe2.position.z = -0.61; g.add(stripe2);
+        glow.position.y = 1.52; g.add(glow);
+
+        // Point light for the glow
+        const cLight = new THREE.PointLight(col, 0.6, 5);
+        cLight.position.set(0, 1.5, 0);
+        g.add(cLight);
 
         return g;
     }
@@ -484,8 +571,9 @@
     }
 
     function spawnBarrel(z) {
+        // Crates positioned on SIDES of the road (like the screenshot)
         const side = Math.random() < 0.5 ? -1 : 1;
-        const x = side * (ROAD_W / 2 - 1.2) * (0.3 + Math.random() * 0.7);
+        const x = side * (ROAD_W / 2 - 1.5 + Math.random() * 0.5);
 
         const types = ['squad', 'weapon', 'coins', 'squad'];
         const weights = [4, 3, 3, 3];
@@ -498,14 +586,14 @@
         const crate = createBarrelObj(type);
         crate.position.set(x, 0, z);
 
-        // HP number on front (big, like screenshot)
-        const hpLabel = createTextSprite(hp.toString(), '#ffffff', 1.0);
-        hpLabel.position.set(0, 1.8, 0);
+        // Big HP number (like screenshot shows 100, 120 etc)
+        const hpLabel = createTextSprite(hp.toString(), '#ffffff', 1.2);
+        hpLabel.position.set(0, 2.2, 0);
         crate.add(hpLabel);
 
-        // Type label
-        const typeLabel = createTextSprite(labels[type], type === 'squad' ? '#44ff88' : type === 'weapon' ? '#ff4444' : '#ffdd44', 0.5);
-        typeLabel.position.set(0, 2.5, 0);
+        // Type label above
+        const typeLabel = createTextSprite(labels[type], type === 'squad' ? '#44ff88' : type === 'weapon' ? '#ff4444' : '#ffdd44', 0.6);
+        typeLabel.position.set(0, 3.0, 0);
         crate.add(typeLabel);
 
         crate.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.35, hpLabel };
@@ -517,32 +605,62 @@
         const w = WEAPONS[weaponLevel];
         const g = new THREE.Group();
         g.position.set(fromX, 0.7, fromZ);
+
+        // Bright core
         const core = new THREE.Mesh(new THREE.SphereGeometry(w.size, 6, 6),
-            new THREE.MeshBasicMaterial({ color: w.color }));
+            new THREE.MeshBasicMaterial({ color: 0xffffcc }));
         g.add(core);
-        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 2, 6, 6),
-            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.3 }));
+
+        // Colored glow
+        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 2.5, 6, 6),
+            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.35 }));
         g.add(glow);
 
-        // Trail
+        // Long fiery trail
         const trail = new THREE.Mesh(
-            new THREE.CylinderGeometry(w.size * 0.5, w.size * 0.3, 0.5, 4),
-            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.5 }));
-        trail.rotation.x = Math.PI / 2; trail.position.z = 0.3;
+            new THREE.CylinderGeometry(w.size * 0.6, 0.02, 1.0, 4),
+            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.6 }));
+        trail.rotation.x = Math.PI / 2; trail.position.z = 0.6;
         g.add(trail);
+
+        // Outer trail glow
+        const trailGlow = new THREE.Mesh(
+            new THREE.CylinderGeometry(w.size * 1.2, 0.05, 0.8, 4),
+            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.15 }));
+        trailGlow.rotation.x = Math.PI / 2; trailGlow.position.z = 0.5;
+        g.add(trailGlow);
 
         g.userData = { damage: bulletDamage, life: 2.5 };
         scene.add(g); bullets.push(g);
     }
 
     function spawnMuzzleFlash(x, z) {
+        // Large bright core flash
         const flash = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 6, 6), MAT.muzzleFlash
+            new THREE.SphereGeometry(0.35, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffee44, transparent: true, opacity: 0.9 })
         );
         flash.position.set(x, 0.7, z - 0.5);
-        flash.userData = { life: 0.06 };
+        flash.userData = { life: 0.08 };
         scene.add(flash);
         muzzleFlashes.push(flash);
+
+        // Outer orange glow
+        const glow = new THREE.Mesh(
+            new THREE.SphereGeometry(0.6, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.4 })
+        );
+        glow.position.set(x, 0.7, z - 0.5);
+        glow.userData = { life: 0.06 };
+        scene.add(glow);
+        muzzleFlashes.push(glow);
+
+        // Dynamic muzzle light
+        const mLight = new THREE.PointLight(0xff8822, 2.0, 8);
+        mLight.position.set(x, 1, z - 0.5);
+        mLight.userData = { life: 0.05 };
+        scene.add(mLight);
+        muzzleFlashes.push(mLight);
     }
 
     function spawnParticles(x, y, z, color, count) {
@@ -561,20 +679,50 @@
     }
 
     function spawnExplosion(x, z) {
-        // Fire particles
-        for (let i = 0; i < 15; i++) {
-            const colors = [0xff4400, 0xff8800, 0xffcc00, 0xff2200];
+        // Big fireball core
+        const fireball = new THREE.Mesh(
+            new THREE.SphereGeometry(0.8, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.8 })
+        );
+        fireball.position.set(x, 1.0, z);
+        fireball.userData = { vel: new THREE.Vector3(0, 2, 0), life: 0.3 };
+        scene.add(fireball); particles.push(fireball);
+
+        // Explosion light
+        const eLight = new THREE.PointLight(0xff6600, 3.0, 12);
+        eLight.position.set(x, 1.5, z);
+        eLight.userData = { life: 0.25 };
+        scene.add(eLight); muzzleFlashes.push(eLight);
+
+        // Fire particles — lots of them
+        for (let i = 0; i < 25; i++) {
+            const colors = [0xff4400, 0xff8800, 0xffcc00, 0xff2200, 0xff6600];
             const c = colors[Math.floor(Math.random() * colors.length)];
+            const size = 0.12 + Math.random() * 0.2;
             const mesh = new THREE.Mesh(
-                new THREE.SphereGeometry(0.1 + Math.random() * 0.15, 5, 5),
+                new THREE.SphereGeometry(size, 5, 5),
                 new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 1 })
             );
-            mesh.position.set(x, 0.5 + Math.random(), z);
+            mesh.position.set(x + (Math.random()-0.5)*0.5, 0.5 + Math.random() * 0.5, z + (Math.random()-0.5)*0.5);
             mesh.userData = {
-                vel: new THREE.Vector3((Math.random()-0.5)*4, Math.random()*6+3, (Math.random()-0.5)*4),
-                life: 0.3 + Math.random() * 0.5,
+                vel: new THREE.Vector3((Math.random()-0.5)*6, Math.random()*8+2, (Math.random()-0.5)*6),
+                life: 0.3 + Math.random() * 0.6,
             };
             scene.add(mesh); particles.push(mesh);
+        }
+
+        // Smoke puffs
+        for (let i = 0; i < 8; i++) {
+            const smoke = new THREE.Mesh(
+                new THREE.SphereGeometry(0.2 + Math.random() * 0.3, 5, 5),
+                new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.6 })
+            );
+            smoke.position.set(x + (Math.random()-0.5), 1 + Math.random(), z + (Math.random()-0.5));
+            smoke.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*2, Math.random()*3+1, (Math.random()-0.5)*2),
+                life: 0.5 + Math.random() * 0.8,
+            };
+            scene.add(smoke); particles.push(smoke);
         }
     }
 
@@ -716,10 +864,38 @@
         shake(0.3); SFX.upgrade();
     }
 
+    // ─── Ambient Fire ───────────────────────────────────────────────
+    let ambientFireTimer = 0;
+    function spawnAmbientFire(dt) {
+        ambientFireTimer += dt;
+        if (ambientFireTimer < 0.15) return;
+        ambientFireTimer = 0;
+
+        // Embers floating up from the battlefield
+        const colors = [0xff4400, 0xff6600, 0xff8800, 0xffaa00];
+        for (let i = 0; i < 2; i++) {
+            const ember = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04 + Math.random() * 0.04, 4, 4),
+                new THREE.MeshBasicMaterial({ color: colors[Math.floor(Math.random() * colors.length)], transparent: true, opacity: 0.8 })
+            );
+            ember.position.set(
+                (Math.random() - 0.5) * ROAD_W,
+                Math.random() * 0.5,
+                -5 - Math.random() * 40
+            );
+            ember.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*0.5, 1.5 + Math.random()*2, (Math.random()-0.5)*0.3),
+                life: 1.0 + Math.random() * 1.5,
+            };
+            scene.add(ember); particles.push(ember);
+        }
+    }
+
     // ─── Main Update ────────────────────────────────────────────────
     function update(dt) {
         if (state !== 'playing') return;
         const time = Date.now() * 0.001;
+        spawnAmbientFire(dt);
 
         // Spawn enemies
         const spawnInt = Math.max(0.25, 2.0 - wave * 0.15) / diff.spawnRate;
@@ -865,11 +1041,12 @@
             });
         });
 
-        // Muzzle flashes
+        // Muzzle flashes & temp lights
         for (let i = muzzleFlashes.length - 1; i >= 0; i--) {
             const m = muzzleFlashes[i];
             m.userData.life -= dt;
-            m.scale.setScalar(1 + (0.06 - m.userData.life) * 15);
+            if (m.scale) m.scale.setScalar(1 + (0.08 - m.userData.life) * 12);
+            if (m.intensity !== undefined) m.intensity *= 0.85; // fade lights
             if (m.userData.life <= 0) { scene.remove(m); muzzleFlashes.splice(i, 1); }
         }
 
@@ -877,9 +1054,13 @@
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
             p.position.add(p.userData.vel.clone().multiplyScalar(dt));
-            p.userData.vel.y -= 12 * dt;
+            p.userData.vel.y -= 10 * dt;
+            p.userData.vel.multiplyScalar(0.98); // air drag
             p.userData.life -= dt;
             p.material.opacity = Math.max(0, p.userData.life * 2);
+            // Fire/smoke grows as it fades
+            const scale = 1 + (1 - p.userData.life) * 1.5;
+            p.scale.setScalar(scale);
             if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
         }
 
