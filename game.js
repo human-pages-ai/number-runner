@@ -14,9 +14,9 @@
         scene.background = new THREE.Color(0x1a1520);
         scene.fog = new THREE.FogExp2(0x1a1520, 0.018);
 
-        // Behind-the-player camera looking forward down the road
+        // Behind-the-player camera — lower, closer, more over-the-shoulder
         camera = new THREE.PerspectiveCamera(55, W() / H(), 0.1, 200);
-        camera.position.set(0, 8, 12);
+        camera.position.set(0, 5.5, 9);
         camera.lookAt(0, 1, -15);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -533,6 +533,7 @@
         soldier.add(weapon);
 
         soldier.position.set(aimX + ox, 0, DEFENSE_Z + 1);
+        soldier.scale.setScalar(1.4); // bigger, more visible from behind
         soldier.userData.offsetX = ox;
         soldier.userData.weapon = weapon;
         soldier.userData.phase = Math.random() * Math.PI * 2;
@@ -960,9 +961,9 @@
             if (b.position.z >= DEFENSE_Z + 5) { scene.remove(b); barrels.splice(i, 1); }
         }
 
-        // Fire
+        // Auto-fire (always shooting)
         fireCooldown -= dt;
-        if (fireCooldown <= 0 && (enemies.length > 0 || barrels.length > 0)) {
+        if (fireCooldown <= 0) {
             for (const s of squad) {
                 createBullet(s.position.x, s.position.z);
                 spawnMuzzleFlash(s.position.x, s.position.z);
@@ -1077,10 +1078,10 @@
         // Camera shake
         if (shakeAmount > 0.01) {
             camera.position.x = (Math.random()-0.5) * shakeAmount * 2;
-            camera.position.y = 8 + (Math.random()-0.5) * shakeAmount;
+            camera.position.y = 5.5 + (Math.random()-0.5) * shakeAmount;
             shakeAmount *= 0.88;
         } else {
-            camera.position.x = 0; camera.position.y = 8; shakeAmount = 0;
+            camera.position.x = 0; camera.position.y = 5.5; shakeAmount = 0;
         }
 
         // Wave progress
