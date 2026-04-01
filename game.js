@@ -260,172 +260,127 @@
         }
     }
 
-    // ─── Character Sprites (canvas-drawn billboards) ────────────────
+    // ─── Pixel Art Sprites ────────────────────────────────────────
+    // 16x16 pixel art drawn pixel-by-pixel, scaled up with nearest-neighbor for crisp retro look
     const charTexCache = {};
 
-    function drawWarrior(ctx, variant) {
-        ctx.save();
-        ctx.translate(64, 8);
-        const blues = ['#3B7DD8', '#4A90D9', '#2E6BC4', '#5599EE'];
-        const c = blues[variant % 4];
+    // Color palette
+    const P = {
+        _: null,               // transparent
+        K: '#111111',          // black outline
+        S: '#EEBB88',          // skin
+        Sd: '#CC9966',         // skin shadow
+        // Warrior colors
+        B: '#3377DD',          // blue armor
+        Bd: '#2255AA',         // blue dark
+        Bl: '#55AAFF',         // blue light
+        G: '#444444',          // gun metal
+        Gd: '#333333',         // gun dark
+        Gl: '#666666',         // gun light
+        R: '#CC3333',          // red bandana
+        Rd: '#992222',         // red dark
+        Y: '#FFD700',          // gold/yellow
+        Br: '#8B5E3C',         // brown leather
+        Brd: '#6B4423',        // brown dark
+        Gy: '#888888',         // grey
+        W: '#FFFFFF',          // white
+        Bl2: '#88CCEE',        // lens blue
+        Bk: '#555555',         // dark armor
+        // Viking colors
+        Vr: '#AA2222',         // viking red
+        Vrd: '#882222',        // viking red dark
+        Vb: '#654321',         // viking brown
+        Vbd: '#4A3015',        // viking brown dark
+        Vh: '#999999',         // helmet grey
+        Vhd: '#777777',        // helmet dark
+        F: '#F5DEB3',          // horn/fur
+        Fd: '#DAC298',         // horn dark
+        Be: '#D2691E',         // beard
+        Bed: '#A0521E',        // beard dark
+        Sh: '#8B7355',         // shield
+    };
 
-        // Legs
-        ctx.fillStyle = '#444';
-        ctx.fillRect(20, 78, 9, 28);
-        ctx.fillRect(35, 78, 9, 28);
-        ctx.fillStyle = '#333';
-        ctx.fillRect(18, 100, 13, 8);
-        ctx.fillRect(33, 100, 13, 8);
-
-        // Body
-        ctx.fillStyle = c;
-        ctx.fillRect(16, 38, 32, 42);
-        // Armor
-        ctx.fillStyle = '#555';
-        ctx.fillRect(20, 42, 24, 14);
-        // Belt
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(16, 73, 32, 5);
-
-        // Arms + skin
-        ctx.fillStyle = '#DDBB88';
-        ctx.fillRect(6, 42, 11, 8);
-        ctx.fillRect(47, 42, 11, 8);
-
-        // Gun
-        ctx.fillStyle = '#333';
-        ctx.fillRect(50, 35, 7, 4);
-        ctx.fillRect(54, 28, 4, 11);
-        ctx.fillStyle = '#C8A000';
-        ctx.fillRect(50, 39, 7, 2);
-
-        // Head
-        ctx.fillStyle = '#DDBB88';
-        ctx.beginPath();
-        ctx.arc(32, 28, 13, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Headgear
-        ctx.fillStyle = '#C0392B';
-        ctx.fillRect(19, 18, 26, 5);
-        ctx.fillStyle = '#FFD700';
-        ctx.fillRect(23, 20, 7, 4);
-        ctx.fillRect(34, 20, 7, 4);
-        ctx.fillStyle = '#88CCEE';
-        ctx.fillRect(25, 21, 4, 2);
-        ctx.fillRect(36, 21, 4, 2);
-
-        ctx.restore();
+    // 16x16 pixel art — warrior with gun (front-facing)
+    function getWarriorPixels(v) {
+        const _ = '_', K = 'K', S = 'S', Sd = 'Sd';
+        const B = v % 2 === 0 ? 'B' : 'Bl', Bd2 = 'Bd', G = 'G', Gd = 'Gd', Gl = 'Gl';
+        const R = 'R', Rd2 = 'Rd', Y = 'Y', Br = 'Br', Bk = 'Bk', Bl2 = 'Bl2', W = 'W';
+        return [
+            //0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
+            [_,  _,  _,  _,  _,  K, K, K, K, K, K, _,  _,  _,  _,  _],  // 0: bandana top
+            [_,  _,  _,  _,  K, R, R, R, R, R, R, K,  _,  _,  _,  _],  // 1: bandana
+            [_,  _,  _,  K, R, Rd2,R, R, R, Rd2,R, R,  K,  _,  _,  _],  // 2: bandana + goggles
+            [_,  _,  _,  K, Y, Bl2,Y, K, K, Y, Bl2,Y,  K,  _,  _,  _],  // 3: goggles
+            [_,  _,  _,  K, S, S, S, S, S, S, S, S,  K,  _,  _,  _],  // 4: face
+            [_,  _,  _,  K, S, K, S, S, S, S, K, S,  K,  _,  _,  _],  // 5: eyes
+            [_,  _,  _,  _,  K, S, S, Sd, Sd,S, S, K,  _,  _,  _,  _],  // 6: chin
+            [_,  _,  K, K, B, B, B, B, B, B, B, B,  K, K, _,  _],  // 7: shoulders
+            [_,  K, S, K, B, Bk, Bk,B, B, Bk,Bk,B,  K, G, K, _],  // 8: chest + arm + gun
+            [_,  K, S, K, B, Bk, Bk,B, B, Bk,Bk,B,  K, G, K, _],  // 9: chest
+            [_,  _,  K, K, B, B, B, B, B, B, B, B,  K, Gl,K, _],  // 10: waist + gun barrel
+            [_,  _,  _,  K, Br, Br,Y, Br,Br,Y, Br,Br, K, K, _,  _],  // 11: belt
+            [_,  _,  _,  K, Bd2,Bd2,Bd2,K, K, Bd2,Bd2,Bd2,K, _,  _,  _],  // 12: pants
+            [_,  _,  _,  K, Bd2,Bd2,Bd2,K, K, Bd2,Bd2,Bd2,K, _,  _,  _],  // 13: pants
+            [_,  _,  _,  K, K, K, K, _,  _,  K, K, K, K, _,  _,  _],  // 14: boots top
+            [_,  _,  K, K, Bk,Bk,K, _,  _,  K, Bk,Bk,K, K, _,  _],  // 15: boots
+        ];
     }
 
-    function drawViking(ctx, variant) {
-        ctx.save();
-        ctx.translate(64, 8);
-        const reds = ['#8B0000', '#A52A2A', '#B22222', '#CC4444'];
-        const c = reds[variant % 4];
+    // 16x16 pixel art — viking with axe and shield
+    function getVikingPixels(v) {
+        const _ = '_', K = 'K';
+        const Vh = 'Vh', Vhd = 'Vhd', F = 'F', Fd = 'Fd';
+        const S = 'S', Sd = 'Sd', Be = v % 2 === 0 ? 'Be' : 'Y';
+        const Vr = v % 2 === 0 ? 'Vr' : 'Vrd', Y = 'Y';
+        const Vb = 'Vb', Vbd = 'Vbd', Sh = 'Sh', Gy = 'Gy', W = 'W';
+        return [
+            [_,  _,  F,  _,  _,  K, K, K, K, K, K, _,  _,  F,  _,  _],  // 0: horns + helmet
+            [_,  F,  Fd, _,  K, Vh,Vh,Vh,Vh,Vh,Vh, K,  _,  Fd, F,  _],  // 1: horns + helmet
+            [_,  _,  _,  K, Vh,Vhd,Vh,Vh,Vh,Vhd,Vh,Vh, K,  _,  _,  _],  // 2: helmet
+            [_,  _,  _,  K, S, S, S, S, S, S, S, S,  K,  _,  _,  _],  // 3: face
+            [_,  _,  _,  K, S, W, K, S, S, K, W, S,  K,  _,  _,  _],  // 4: eyes (angry)
+            [_,  _,  _,  K, S, Be,Be,Be,Be,Be,Be,S,  K,  _,  _,  _],  // 5: beard
+            [_,  _,  _,  _,  K, Be,Be,Be,Be,Be,Be,K,  _,  _,  _,  _],  // 6: beard
+            [_,  K, Sh,K, Vr,Vr,Y, Vr,Vr,Y, Vr,Vr, K, Vb,K, _],  // 7: shoulders + shield + axe handle
+            [K,  Sh,Sh,K, Vr,Vr,Y, Vr,Vr,Y, Vr,Vr, K, Vb,K, _],  // 8: chest + shield
+            [K,  Sh,Y, K, Vr,Vr,Vr,Vr,Vr,Vr,Vr,Vr, K, Gy,Gy,K],  // 9: chest + shield boss + axe head
+            [K,  Sh,Sh,K, Vr,Vr,Y, Vr,Vr,Y, Vr,Vr, K, Gy,Gy,K],  // 10: waist + axe
+            [_,  K, Sh,K, Vb,Vb,Y, Vb,Vb,Y, Vb,Vb, K, Vb,K, _],  // 11: belt
+            [_,  _,  K, K, Vb,Vb,Vb,K, K, Vb,Vb,Vb, K, K, _,  _],  // 12: pants
+            [_,  _,  _,  K, Vb,Vb,Vb,K, K, Vb,Vb,Vb, K, _,  _,  _],  // 13: pants
+            [_,  _,  _,  K, F, F, K, _,  _,  K, F, F, K, _,  _,  _],  // 14: fur boots
+            [_,  _,  K, K, Sh,Sh,K, _,  _,  K, Sh,Sh,K, K, _,  _],  // 15: boots
+        ];
+    }
 
-        // Legs
-        ctx.fillStyle = '#654321';
-        ctx.fillRect(20, 80, 9, 26);
-        ctx.fillRect(35, 80, 9, 26);
-        ctx.fillStyle = '#8B7355';
-        ctx.fillRect(17, 100, 14, 8);
-        ctx.fillRect(33, 100, 14, 8);
+    function renderPixelSprite(pixels, size) {
+        const canvas = document.createElement('canvas');
+        const s = size || 8; // scale factor: each pixel = s screen pixels
+        canvas.width = 16 * s;
+        canvas.height = 16 * s;
+        const ctx = canvas.getContext('2d');
 
-        // Body
-        ctx.fillStyle = c;
-        ctx.fillRect(15, 38, 34, 44);
-        ctx.fillStyle = '#FFD700';
-        ctx.fillRect(29, 40, 4, 32);
-        ctx.fillRect(21, 48, 22, 3);
-
-        // Belt
-        ctx.fillStyle = '#654321';
-        ctx.fillRect(15, 76, 34, 5);
-
-        // Arms
-        ctx.fillStyle = '#DDBB88';
-        ctx.fillRect(5, 42, 11, 8);
-        ctx.fillRect(48, 42, 11, 8);
-
-        // Shield
-        ctx.fillStyle = '#654321';
-        ctx.beginPath();
-        ctx.arc(5, 58, 12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#FFD700';
-        ctx.beginPath();
-        ctx.arc(5, 58, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Axe
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(54, 33, 3, 36);
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.moveTo(57, 33);
-        ctx.lineTo(68, 29);
-        ctx.lineTo(68, 44);
-        ctx.lineTo(57, 40);
-        ctx.fill();
-
-        // Head
-        ctx.fillStyle = '#DDBB88';
-        ctx.beginPath();
-        ctx.arc(32, 26, 14, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Beard
-        ctx.fillStyle = variant % 2 === 0 ? '#D2691E' : '#B8860B';
-        ctx.beginPath();
-        ctx.moveTo(21, 30);
-        ctx.quadraticCurveTo(32, 48, 43, 30);
-        ctx.fill();
-
-        // Helmet
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.arc(32, 22, 15, Math.PI, 0);
-        ctx.fill();
-        // Horns
-        ctx.fillStyle = '#F5DEB3';
-        ctx.beginPath();
-        ctx.moveTo(17, 20);
-        ctx.quadraticCurveTo(7, 4, 11, 1);
-        ctx.quadraticCurveTo(15, 7, 19, 18);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(47, 20);
-        ctx.quadraticCurveTo(57, 4, 53, 1);
-        ctx.quadraticCurveTo(49, 7, 45, 18);
-        ctx.fill();
-
-        // Eyes
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(24, 22, 5, 4);
-        ctx.fillRect(35, 22, 5, 4);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(26, 23, 3, 2);
-        ctx.fillRect(37, 23, 3, 2);
-
-        ctx.restore();
+        for (let y = 0; y < 16; y++) {
+            for (let x = 0; x < 16; x++) {
+                const key = pixels[y][x];
+                if (key === '_') continue;
+                ctx.fillStyle = P[key];
+                ctx.fillRect(x * s, y * s, s, s);
+            }
+        }
+        return canvas;
     }
 
     function getCharTexture(type, variant) {
         const key = type + variant;
         if (charTexCache[key]) return charTexCache[key];
 
-        const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
-        const ctx = canvas.getContext('2d');
-
-        if (type === 'viking') drawViking(ctx, variant);
-        else drawWarrior(ctx, variant);
+        const pixels = type === 'viking' ? getVikingPixels(variant) : getWarriorPixels(variant);
+        const canvas = renderPixelSprite(pixels, 8);
 
         const tex = new THREE.CanvasTexture(canvas);
-        tex.minFilter = THREE.LinearFilter;
-        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.NearestFilter;
+        tex.magFilter = THREE.NearestFilter; // crisp pixel art, no smoothing
         charTexCache[key] = tex;
         return tex;
     }
@@ -445,9 +400,9 @@
 
     function createSquadMember(index) {
         const spread = Math.min(squadCount - 1, 5) * 0.8;
-        const x = squadCount === 1 ? 0 : -spread / 2 + (index / Math.max(1, squadCount - 1)) * spread;
-        const sprite = createCharSprite(x, DEFENSE_Z + 2, 'warrior');
-        sprite.userData = { index, baseX: x, phase: Math.random() * Math.PI * 2 };
+        const offsetX = squadCount === 1 ? 0 : -spread / 2 + (index / Math.max(1, squadCount - 1)) * spread;
+        const sprite = createCharSprite(aimX + offsetX, DEFENSE_Z + 2, 'warrior');
+        sprite.userData = { index, offsetX, phase: Math.random() * Math.PI * 2 };
         return sprite;
     }
 
@@ -539,8 +494,9 @@
         barrels.push(group);
     }
 
-    function createBullet(fromX, fromZ, toX, toZ) {
-        const dir = new THREE.Vector3(toX - fromX, 0, toZ - fromZ).normalize();
+    function createBullet(fromX, fromZ) {
+        // Always shoot straight forward (negative Z)
+        const dir = new THREE.Vector3(0, 0, -1);
 
         const group = new THREE.Group();
         group.position.set(fromX, 1, fromZ);
@@ -739,26 +695,6 @@
         coinDisplay.textContent = coins;
     }
 
-    // ─── Aiming ─────────────────────────────────────────────────────
-    function findNearestTarget() {
-        let best = null;
-        let bestDist = Infinity;
-
-        // Check enemies
-        for (const e of enemies) {
-            const d = e.position.distanceTo(new THREE.Vector3(aimX, 0, DEFENSE_Z));
-            if (d < bestDist) { bestDist = d; best = e; }
-        }
-
-        // Check barrels
-        for (const b of barrels) {
-            const d = b.position.distanceTo(new THREE.Vector3(aimX, 0, DEFENSE_Z));
-            if (d < bestDist) { bestDist = d; best = b; }
-        }
-
-        return best;
-    }
-
     // ─── Main Update ────────────────────────────────────────────────
     function update(dt) {
         if (state !== 'playing') return;
@@ -843,15 +779,13 @@
             }
         }
 
-        // ── Auto-aim & fire ──
-        const target = findNearestTarget();
+        // ── Fire straight ahead ──
         fireCooldown -= dt;
 
-        if (target && fireCooldown <= 0) {
-            const targetPos = target.position;
-            // Each squad member fires
+        if (fireCooldown <= 0 && (enemies.length > 0 || barrels.length > 0)) {
+            // Each squad member fires straight forward
             for (const s of squad) {
-                createBullet(s.position.x, s.position.z, targetPos.x, targetPos.z);
+                createBullet(s.position.x, s.position.z);
             }
             fireCooldown = 1 / fireRate;
         }
@@ -868,11 +802,13 @@
                 continue;
             }
 
-            // Hit enemies
+            // Hit enemies (check if bullet is close in X and Z)
             let hit = false;
             for (let j = enemies.length - 1; j >= 0; j--) {
                 const e = enemies[j];
-                if (b.position.distanceTo(e.position) < 1.2) {
+                const dx = Math.abs(b.position.x - e.position.x);
+                const dz = Math.abs(b.position.z - e.position.z);
+                if (dx < 0.9 && dz < 0.9) {
                     e.userData.hp -= b.userData.damage;
                     SFX.hit();
 
@@ -903,7 +839,9 @@
             // Hit barrels
             for (let j = barrels.length - 1; j >= 0; j--) {
                 const br = barrels[j];
-                if (b.position.distanceTo(br.position) < 1.0) {
+                const dx = Math.abs(b.position.x - br.position.x);
+                const dz = Math.abs(b.position.z - br.position.z);
+                if (dx < 0.8 && dz < 0.8) {
                     br.userData.hp -= b.userData.damage;
                     SFX.hit();
 
@@ -929,13 +867,10 @@
             }
         }
 
-        // ── Animate squad ──
+        // ── Animate squad (follows aimX) ──
         squad.forEach(s => {
+            s.position.x = aimX + s.userData.offsetX;
             s.position.y = 0.9 + Math.abs(Math.sin(time * 2 + s.userData.phase)) * 0.06;
-            // Face toward aim target
-            if (target) {
-                s.position.x = s.userData.baseX + Math.sin(time + s.userData.phase) * 0.1;
-            }
         });
 
         // ── Update particles ──
