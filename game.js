@@ -180,10 +180,15 @@
 
     let squad = [], enemies = [], barrels = [], bullets = [], particles = [];
     let coinPickups = [];
+    let damageNums = [];
     let aimX = 0, fireCooldown = 0, shakeAmount = 0;
     let waveEnemiesLeft = 0, waveEnemiesTotal = 0, waveBarrelsLeft = 0;
     let spawnTimer = 0, barrelTimer = 0;
     let muzzleFlashes = [];
+    let freezeTimer = 0;
+    let comboCount = 0, comboTimer = 0;
+    const WHITE_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const dangerVignette = document.getElementById('danger-vignette');
 
     const ROAD_W = 10;
     const DEFENSE_Z = 2;
@@ -803,6 +808,43 @@
         scene.add(mesh); coinPickups.push(mesh);
     }
 
+    // ─── Damage Numbers ─────────────────────────────────────────────
+    function spawnDamageNumber(x, y, z, damage) {
+        const isCrit = Math.random() < 0.10;
+        const actualDamage = isCrit ? damage * 2 : damage;
+        const text = isCrit ? 'CRIT' : actualDamage.toString();
+        const color = isCrit ? '#ffffff' : '#ffdd00';
+        const baseScale = 0.4 + Math.random() * 0.2; // 0.4-0.6 with +/-20% variation
+        const scale = isCrit ? baseScale * 1.5 : baseScale;
+        const sprite = createTextSprite(text, color, scale);
+        sprite.position.set(x + (Math.random() - 0.5) * 0.6, y, z);
+        sprite.userData.vy = 3;
+        sprite.userData.life = 0.6;
+        sprite.userData.maxLife = 0.6;
+        sprite.userData.isCrit = isCrit;
+        scene.add(sprite);
+        damageNums.push(sprite);
+        return isCrit ? actualDamage : damage;
+    }
+
+    // ─── White Flash on Damage ──────────────────────────────────────
+    function flashEnemyWhite(enemyGroup) {
+        const origMaterials = [];
+        enemyGroup.userData.zombies.forEach(zombie => {
+            zombie.traverse(child => {
+                if (child.isMesh) {
+                    origMaterials.push({ mesh: child, mat: child.material });
+                    child.material = WHITE_MAT;
+                }
+            });
+        });
+        setTimeout(() => {
+            origMaterials.forEach(({ mesh, mat }) => {
+                if (mesh.parent) mesh.material = mat;
+            });
+        }, 50);
+    }
+
     // ─── Wave System ────────────────────────────────────────────────
     function startWave() {
         wave++;
@@ -831,7 +873,10 @@
         coinPickups.forEach(c => scene.remove(c));
         muzzleFlashes.forEach(m => scene.remove(m));
         squad.forEach(s => scene.remove(s));
-        enemies=[]; barrels=[]; bullets=[]; particles=[]; coinPickups=[]; muzzleFlashes=[]; squad=[];
+        damageNums.forEach(d => scene.remove(d));
+        enemies=[]; barrels=[]; bullets=[]; particles=[]; coinPickups=[]; muzzleFlashes=[]; squad=[]; damageNums=[];
+        freezeTimer = 0; comboCount = 0; comboTimer = 0;
+        if (dangerVignette) dangerVignette.classList.remove('active');
     }
 
     // ─── Upgrades ───────────────────────────────────────────────────
@@ -1006,7 +1051,21 @@
     // ─── Main Update ────────────────────────────────────────────────
     function update(dt) {
         if (state !== 'playing') return;
+
+        // Hit-freeze: skip update frames
+        if (freezeTimer > 0) {
+            freezeTimer -= dt;
+            return;
+        }
+
         const time = Date.now() * 0.001;
+
+        // Combo timer countdown
+        if (comboTimer > 0) {
+            comboTimer -= dt;
+            if (comboTimer <= 0) comboCount = 0;
+        }
+
         spawnAmbientFire(dt);
 
         // Spawn enemies
@@ -1111,9 +1170,19 @@
                 const dz = Math.abs(b.position.z - e.position.z);
                 const hr = 1.0 + e.userData.zombies.length * 0.05;
                 if (dx < hr && dz < hr) {
-                    const kills = Math.min(b.userData.damage, e.userData.hp);
+                    // Spawn damage number (may upgrade to crit)
+                    const effectiveDamage = spawnDamageNumber(
+                        b.position.x, 1.5, b.position.z, b.userData.damage
+                    );
+                    const kills = Math.min(effectiveDamage, e.userData.hp);
                     e.userData.hp -= kills;
                     SFX.hit();
+
+                    // Knockback on hit
+                    e.position.z -= 0.3;
+
+                    // White flash on damage
+                    flashEnemyWhite(e);
 
                     for (let k = 0; k < kills && e.userData.zombies.length > 0; k++) {
                         const dead = e.userData.zombies.pop();
@@ -1122,12 +1191,24 @@
                     }
 
                     if (e.userData.hp <= 0) {
-                        const reward = Math.ceil(e.userData.maxHp * 0.3 * diff.coins);
+                        // Combo tracking
+                        comboCount++;
+                        comboTimer = 2.0;
+                        if (comboCount >= 2) {
+                            showActionText('x' + comboCount + ' COMBO', '#ff44ff');
+                        }
+
+                        let reward = Math.ceil(e.userData.maxHp * 0.3 * diff.coins);
+                        // Bonus coins at 5x+ combo
+                        if (comboCount >= 5) reward *= 2;
                         coins += reward; score += e.userData.maxHp;
                         spawnCoinPickup(e.position.x, e.position.z, reward);
                         spawnExplosion(e.position.x, e.position.z);
                         SFX.enemyDie();
                         scene.remove(e); enemies.splice(j, 1);
+
+                        // Hit-freeze on kill (30ms = ~2 frames)
+                        freezeTimer = 0.03;
                     }
 
                     scene.remove(b); bullets.splice(i, 1); hit = true; break;
@@ -1212,6 +1293,32 @@
             shakeAmount *= 0.88;
         } else {
             camera.position.x = 0; camera.position.y = 14; shakeAmount = 0;
+        }
+
+        // Damage numbers — float up and fade
+        for (let i = damageNums.length - 1; i >= 0; i--) {
+            const d = damageNums[i];
+            d.position.y += d.userData.vy * dt;
+            d.userData.life -= dt;
+            d.material.opacity = Math.max(0, d.userData.life / d.userData.maxLife);
+            if (d.userData.life <= 0) {
+                scene.remove(d); damageNums.splice(i, 1);
+            }
+        }
+
+        // Near-miss warning — red vignette when enemies are close
+        let dangerClose = false;
+        for (const e of enemies) {
+            if (e.position.z > DEFENSE_Z - 3) { dangerClose = true; break; }
+        }
+        if (dangerVignette) {
+            if (dangerClose) {
+                // Pulsing opacity
+                const pulse = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
+                dangerVignette.style.opacity = pulse;
+            } else {
+                dangerVignette.style.opacity = '0';
+            }
         }
 
         // Wave progress

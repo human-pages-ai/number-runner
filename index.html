@@ -143,6 +143,20 @@
         }
         #action-text.show { opacity: 1; }
 
+        /* Danger vignette — near-miss warning */
+        #danger-vignette {
+            position: fixed; inset: 0;
+            pointer-events: none; z-index: 6;
+            border: 0px solid transparent;
+            box-sizing: border-box;
+            opacity: 0;
+            transition: opacity 0.15s;
+            box-shadow: inset 0 0 80px 30px rgba(255, 0, 0, 0.6);
+        }
+        #danger-vignette.active {
+            opacity: 1;
+        }
+
         @media (max-width: 600px) {
             #start-screen h1 { font-size: 2.2rem; }
             #gameover-screen h1 { font-size: 2rem; }
@@ -188,6 +202,7 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="game.js?v=10"></script>
+    <div id="danger-vignette"></div>
+    <script src="game.js?v=11"></script>
 </body>
 </html>
