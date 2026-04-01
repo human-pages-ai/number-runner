@@ -11,13 +11,13 @@
 
     function initRenderer() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1520);
-        scene.fog = new THREE.FogExp2(0x1a1520, 0.018);
+        scene.background = new THREE.Color(0x332922);
+        scene.fog = new THREE.FogExp2(0x332922, 0.012);
 
-        // Behind-the-player camera — very close, right behind squad
-        camera = new THREE.PerspectiveCamera(65, W() / H(), 0.1, 200);
-        camera.position.set(0, 3.5, 5.5);
-        camera.lookAt(0, 1, -8);
+        // High-angle camera ~45° looking down (like the reference)
+        camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 200);
+        camera.position.set(0, 14, 10);
+        camera.lookAt(0, 0, -5);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(W(), H());
@@ -25,14 +25,14 @@
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.1;
+        renderer.toneMappingExposure = 1.0;
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
-        // Ambient — enough to see the action
-        scene.add(new THREE.AmbientLight(0x556677, 0.6));
+        // Warm ambient — enough to see but dark enough for fire to pop
+        scene.add(new THREE.AmbientLight(0x665544, 0.5));
 
-        // Main directional
-        const sun = new THREE.DirectionalLight(0xccbbaa, 0.5);
+        // Warm directional (sun)
+        const sun = new THREE.DirectionalLight(0xffeedd, 0.7);
         sun.position.set(5, 20, 10);
         sun.castShadow = true;
         sun.shadow.camera.left = -20;
@@ -43,20 +43,15 @@
         sun.shadow.mapSize.height = 2048;
         scene.add(sun);
 
-        // Warm fire-colored point light at player (big radius)
-        const pLight = new THREE.PointLight(0xff6622, 1.2, 35);
-        pLight.position.set(0, 3, 6);
+        // Warm fire glow at player area
+        const pLight = new THREE.PointLight(0xff8844, 1.0, 30);
+        pLight.position.set(0, 3, 4);
         scene.add(pLight);
 
-        // Secondary fire glow down the road
-        const pLight2 = new THREE.PointLight(0xff4400, 0.6, 30);
-        pLight2.position.set(0, 2, -10);
+        // Fire glow mid-field
+        const pLight2 = new THREE.PointLight(0xff6622, 0.8, 25);
+        pLight2.position.set(0, 2, -8);
         scene.add(pLight2);
-
-        // Red rim from the far end (enemy side)
-        const farLight = new THREE.PointLight(0xff2200, 0.5, 50);
-        farLight.position.set(0, 5, -40);
-        scene.add(farLight);
 
         window.addEventListener('resize', () => {
             camera.aspect = W() / H();
@@ -130,10 +125,10 @@
         wallTop: new THREE.MeshStandardMaterial({ color: 0x666677 }),
         skin: new THREE.MeshStandardMaterial({ color: 0xDDBB88 }),
         skinDark: new THREE.MeshStandardMaterial({ color: 0xBB9966 }),
-        soldierBody: new THREE.MeshStandardMaterial({ color: 0x88AA44 }),
-        soldierPants: new THREE.MeshStandardMaterial({ color: 0x667733 }),
-        soldierBoots: new THREE.MeshStandardMaterial({ color: 0x555555 }),
-        soldierVest: new THREE.MeshStandardMaterial({ color: 0xAACC55 }),
+        soldierBody: new THREE.MeshStandardMaterial({ color: 0xBB8833 }),
+        soldierPants: new THREE.MeshStandardMaterial({ color: 0x886633 }),
+        soldierBoots: new THREE.MeshStandardMaterial({ color: 0x444444 }),
+        soldierVest: new THREE.MeshStandardMaterial({ color: 0xCC9944 }),
         gun: new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.7, roughness: 0.3 }),
         gunAccent: new THREE.MeshStandardMaterial({ color: 0x556633, metalness: 0.3 }),
         zombieSkin: new THREE.MeshStandardMaterial({ color: 0x779966 }),
@@ -148,7 +143,7 @@
         muzzleFlash: new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.8 }),
         firePart: new THREE.MeshBasicMaterial({ color: 0xff6622, transparent: true }),
         coin: new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.8, roughness: 0.2 }),
-        selCircle: new THREE.MeshBasicMaterial({ color: 0x44ddff, transparent: true, opacity: 0.4 }),
+        selCircle: new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6 }),
     };
 
     // ─── Difficulty ─────────────────────────────────────────────────
@@ -168,18 +163,18 @@
 
     // ─── Weapons ────────────────────────────────────────────────────
     const WEAPONS = [
-        { name: 'Pistol',      damage: 1, fireRate: 2.5, color: 0xffee44, size: 0.10 },
-        { name: 'SMG',         damage: 1, fireRate: 5.0, color: 0xffaa22, size: 0.11 },
-        { name: 'Shotgun',     damage: 3, fireRate: 1.8, color: 0xff8822, size: 0.14 },
-        { name: 'Machine Gun', damage: 2, fireRate: 8.0, color: 0xff5500, size: 0.13 },
-        { name: 'Minigun',     damage: 4, fireRate: 12,  color: 0xff2200, size: 0.15 },
+        { name: 'Pistol',      damage: 1, fireRate: 4.0, color: 0xffee44, size: 0.12 },
+        { name: 'SMG',         damage: 1, fireRate: 7.0, color: 0xffaa22, size: 0.12 },
+        { name: 'Shotgun',     damage: 3, fireRate: 3.0, color: 0xff8822, size: 0.15 },
+        { name: 'Machine Gun', damage: 2, fireRate: 10,  color: 0xff5500, size: 0.14 },
+        { name: 'Minigun',     damage: 4, fireRate: 15,  color: 0xff2200, size: 0.16 },
     ];
 
     // ─── Game State ─────────────────────────────────────────────────
     let state = 'menu';
     let wave = 0, score = 0, coins = 0;
     let squadCount = 1, weaponLevel = 0;
-    let bulletDamage = 1, fireRate = 2.5, bulletSpeed = 35;
+    let bulletDamage = 1, fireRate = 2.5, bulletSpeed = 22;
     let pressure = 1.0, squadAtWaveStart = 1;
     let upgrades = { weapon: 0, squad: 0 };
 
@@ -192,8 +187,8 @@
 
     const ROAD_W = 10;
     const DEFENSE_Z = 2;
-    const SPAWN_Z_MIN = -55;
-    const SPAWN_Z_MAX = -25;
+    const SPAWN_Z_MIN = -35;
+    const SPAWN_Z_MAX = -18;
 
     // ─── Road / Environment ─────────────────────────────────────────
     let envMeshes = [];
@@ -202,84 +197,61 @@
         envMeshes.forEach(m => scene.remove(m));
         envMeshes = [];
 
-        // Road (darker, battle-worn)
+        // Road — dark asphalt, warm tint
         const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 100),
-            new THREE.MeshStandardMaterial({ color: 0x333340, roughness: 0.9 }));
+            new THREE.MeshStandardMaterial({ color: 0x4a3d32, roughness: 0.9 }));
         road.rotation.x = -Math.PI / 2;
         road.position.set(0, -0.01, -25);
         road.receiveShadow = true;
         scene.add(road); envMeshes.push(road);
 
-        // Center line (dashed)
-        for (let z = 5; z > -70; z -= 4) {
-            const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 1.5), MAT.roadLine);
-            dash.rotation.x = -Math.PI / 2;
-            dash.position.set(0, 0.01, z);
-            scene.add(dash); envMeshes.push(dash);
+        // Road edge lines
+        for (const side of [-1, 1]) {
+            const line = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 100),
+                new THREE.MeshBasicMaterial({ color: 0x999988 }));
+            line.rotation.x = -Math.PI / 2;
+            line.position.set(side * (ROAD_W / 2 - 0.3), 0.01, -25);
+            scene.add(line); envMeshes.push(line);
         }
 
-        // Edge lines on road
+        // Side barriers — low concrete walls with flat tops
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x666655, roughness: 0.9 });
         for (const side of [-1, 1]) {
-            for (let z = 5; z > -70; z -= 2) {
-                const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 1.2),
-                    new THREE.MeshBasicMaterial({ color: 0x555560 }));
-                mark.rotation.x = -Math.PI / 2;
-                mark.position.set(side * (ROAD_W / 2 - 0.4), 0.01, z);
-                scene.add(mark); envMeshes.push(mark);
-            }
-        }
-
-        // Side walls — very low, very dark, just a border
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 1.0, metalness: 0 });
-        for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.8, 100), wallMat);
-            wall.position.set(side * (ROAD_W / 2 + 0.2), 0.4, -25);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 100), wallMat);
+            wall.position.set(side * (ROAD_W / 2 + 0.4), 0.3, -25);
+            wall.castShadow = true;
             scene.add(wall); envMeshes.push(wall);
-        }
 
-        // Ground beyond walls
-        for (const side of [-1, 1]) {
-            const gnd = new THREE.Mesh(new THREE.PlaneGeometry(30, 100),
-                new THREE.MeshStandardMaterial({ color: 0x222230 }));
+            // Outer ground (darker)
+            const gnd = new THREE.Mesh(new THREE.PlaneGeometry(20, 100),
+                new THREE.MeshStandardMaterial({ color: 0x554433 }));
             gnd.rotation.x = -Math.PI / 2;
-            gnd.position.set(side * 19, -0.05, -25);
+            gnd.position.set(side * 15, -0.05, -25);
             scene.add(gnd); envMeshes.push(gnd);
         }
 
-        // Rubble/debris on road
-        const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x555544 });
-        for (let i = 0; i < 25; i++) {
-            const s = 0.1 + Math.random() * 0.25;
-            const rubble = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.6, s), rubbleMat);
+        // Scattered rubble/debris on road
+        const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x776655 });
+        for (let i = 0; i < 20; i++) {
+            const s = 0.08 + Math.random() * 0.18;
+            const rubble = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.4, s), rubbleMat);
             rubble.position.set(
-                (Math.random() - 0.5) * ROAD_W * 0.9,
-                s * 0.3,
-                -5 - Math.random() * 55
+                (Math.random() - 0.5) * ROAD_W * 0.8,
+                s * 0.2,
+                -3 - Math.random() * 50
             );
             rubble.rotation.y = Math.random() * Math.PI;
-            rubble.rotation.z = Math.random() * 0.3;
             scene.add(rubble); envMeshes.push(rubble);
         }
 
-        // Barricade at defense line
-        const barricadeMat = new THREE.MeshStandardMaterial({ color: 0x665533, roughness: 0.9 });
-        for (let x = -ROAD_W / 2 + 0.5; x <= ROAD_W / 2 - 0.5; x += 1.8) {
-            const sandbag = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.35, 0.5), barricadeMat);
-            sandbag.position.set(x + (Math.random() - 0.5) * 0.3, 0.18, DEFENSE_Z + 2.5);
-            sandbag.rotation.y = (Math.random() - 0.5) * 0.15;
-            scene.add(sandbag); envMeshes.push(sandbag);
-        }
-        // Second row
-        for (let x = -ROAD_W / 2 + 1.2; x <= ROAD_W / 2 - 1.2; x += 2.0) {
-            const sandbag = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.3, 0.45), barricadeMat);
-            sandbag.position.set(x, 0.48, DEFENSE_Z + 2.5);
-            scene.add(sandbag); envMeshes.push(sandbag);
-        }
-
-        // Subtle ground lights along the road center
-        for (let z = -5; z > -50; z -= 15) {
-            const fLight = new THREE.PointLight(0xff6622, 0.2, 6);
-            fLight.position.set(0, 0.5, z);
+        // Small ground fires scattered (static orange point lights)
+        for (let i = 0; i < 8; i++) {
+            const fLight = new THREE.PointLight(0xff6622, 0.4, 5);
+            fLight.position.set(
+                (Math.random() - 0.5) * ROAD_W * 0.6,
+                0.3,
+                -2 - Math.random() * 30
+            );
             scene.add(fLight); envMeshes.push(fLight);
         }
     }
@@ -331,14 +303,23 @@
         const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), MAT.soldierVest);
         helmet.position.y = 1.2; helmet.scale.set(1, 0.8, 1); g.add(helmet);
 
-        // Selection circle under feet
+        // Cyan selection circle under feet (like reference)
         const circle = new THREE.Mesh(
-            new THREE.RingGeometry(0.25, 0.35, 16),
+            new THREE.RingGeometry(0.35, 0.5, 20),
             MAT.selCircle
         );
         circle.rotation.x = -Math.PI / 2;
         circle.position.y = 0.02;
         g.add(circle);
+
+        // Inner filled circle for more visibility
+        const circleFill = new THREE.Mesh(
+            new THREE.CircleGeometry(0.35, 20),
+            new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.15 })
+        );
+        circleFill.rotation.x = -Math.PI / 2;
+        circleFill.position.y = 0.01;
+        g.add(circleFill);
 
         return g;
     }
@@ -430,44 +411,37 @@
 
     function createBarrelObj(type) {
         const g = new THREE.Group();
-        const colors = { squad: 0x44ff88, weapon: 0xff4444, coins: 0xffdd44 };
-        const col = colors[type];
+        // Reference uses dark metallic crates with cyan/teal accents
+        const accentColors = { squad: 0x00ffcc, weapon: 0x00ddff, coins: 0x00ffcc };
+        const col = accentColors[type];
 
-        // Crate body — bigger, chunkier (like screenshot)
-        const crateMat = new THREE.MeshStandardMaterial({ color: 0x5a4a30, roughness: 0.8 });
-        const crate = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), crateMat);
-        crate.position.y = 0.75; crate.castShadow = true; g.add(crate);
+        // Dark metallic crate body
+        const crateMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.6, metalness: 0.3 });
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.8, 1.8), crateMat);
+        crate.position.y = 0.9; crate.castShadow = true; g.add(crate);
 
-        // Metal edges/bands
-        const edgeMat = new THREE.MeshStandardMaterial({ color: 0x666655, metalness: 0.4 });
-        const edgeGeo = new THREE.BoxGeometry(1.55, 0.1, 1.55);
-        for (const y of [0.05, 0.75, 1.45]) {
+        // Cyan/teal edge bands
+        const edgeMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7 });
+        const edgeGeo = new THREE.BoxGeometry(1.85, 0.08, 1.85);
+        for (const y of [0.05, 1.75]) {
             const edge = new THREE.Mesh(edgeGeo, edgeMat);
             edge.position.y = y; g.add(edge);
         }
 
-        // Colored glowing panels on all 4 sides
-        const panelGeo = new THREE.BoxGeometry(1.0, 0.8, 0.06);
-        const panelMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5 });
+        // Cyan accent stripes on sides
+        const stripeMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5 });
         for (let r = 0; r < 4; r++) {
-            const panel = new THREE.Mesh(panelGeo, panelMat);
-            panel.position.y = 0.75;
+            const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.12, 0.05), stripeMat);
+            stripe.position.y = 0.9;
             const angle = r * Math.PI / 2;
-            panel.position.x = Math.sin(angle) * 0.76;
-            panel.position.z = Math.cos(angle) * 0.76;
-            panel.rotation.y = angle;
-            g.add(panel);
+            stripe.position.x = Math.sin(angle) * 0.91;
+            stripe.position.z = Math.cos(angle) * 0.91;
+            stripe.rotation.y = angle;
+            g.add(stripe);
         }
 
-        // Top glow
-        const glow = new THREE.Mesh(
-            new THREE.BoxGeometry(1.1, 0.06, 1.1),
-            new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.6 })
-        );
-        glow.position.y = 1.52; g.add(glow);
-
-        // Point light for the glow
-        const cLight = new THREE.PointLight(col, 0.6, 5);
+        // Cyan glow light
+        const cLight = new THREE.PointLight(col, 0.5, 6);
         cLight.position.set(0, 1.5, 0);
         g.add(cLight);
 
@@ -516,7 +490,7 @@
         soldier.add(weapon);
 
         soldier.position.set(aimX + ox, 0, DEFENSE_Z + 1);
-        soldier.scale.setScalar(2.2); // big, clearly visible from behind
+        soldier.scale.setScalar(1.5);
         soldier.userData.offsetX = ox;
         soldier.userData.weapon = weapon;
         soldier.userData.phase = Math.random() * Math.PI * 2;
@@ -548,6 +522,7 @@
             zombies.push(zombie);
         }
 
+        group.scale.setScalar(1.3); // bigger zombies visible from high camera
         const speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.04);
         group.userData = { hp, maxHp: hp, speed, wobble: Math.random() * Math.PI * 2, zombies };
         scene.add(group);
@@ -570,14 +545,14 @@
         const crate = createBarrelObj(type);
         crate.position.set(x, 0, z);
 
-        // Big HP number (like screenshot shows 100, 120 etc)
-        const hpLabel = createTextSprite(hp.toString(), '#ffffff', 1.2);
-        hpLabel.position.set(0, 2.2, 0);
+        // Big cyan HP number (like screenshot shows 100, 120 in teal)
+        const hpLabel = createTextSprite(hp.toString(), '#00ffdd', 1.5);
+        hpLabel.position.set(0, 2.8, 0);
         crate.add(hpLabel);
 
-        // Type label above
-        const typeLabel = createTextSprite(labels[type], type === 'squad' ? '#44ff88' : type === 'weapon' ? '#ff4444' : '#ffdd44', 0.6);
-        typeLabel.position.set(0, 3.0, 0);
+        // Type label above — small, white
+        const typeLabel = createTextSprite(labels[type], '#ffffff', 0.5);
+        typeLabel.position.set(0, 3.8, 0);
         crate.add(typeLabel);
 
         crate.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.35, hpLabel };
@@ -588,31 +563,17 @@
     function createBullet(fromX, fromZ) {
         const w = WEAPONS[weaponLevel];
         const g = new THREE.Group();
-        g.position.set(fromX, 0.7, fromZ);
+        g.position.set(fromX + (Math.random()-0.5)*0.15, 0.4, fromZ);
 
-        // Bright core
-        const core = new THREE.Mesh(new THREE.SphereGeometry(w.size, 6, 6),
-            new THREE.MeshBasicMaterial({ color: 0xffffcc }));
+        // Bright yellow-white core — big enough to see from above
+        const core = new THREE.Mesh(new THREE.SphereGeometry(w.size * 1.8, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0xffff66 }));
         g.add(core);
 
-        // Colored glow
-        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 2.5, 6, 6),
-            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.35 }));
+        // Orange glow
+        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 3.5, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.35 }));
         g.add(glow);
-
-        // Long fiery trail
-        const trail = new THREE.Mesh(
-            new THREE.CylinderGeometry(w.size * 0.6, 0.02, 1.0, 4),
-            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.6 }));
-        trail.rotation.x = Math.PI / 2; trail.position.z = 0.6;
-        g.add(trail);
-
-        // Outer trail glow
-        const trailGlow = new THREE.Mesh(
-            new THREE.CylinderGeometry(w.size * 1.2, 0.05, 0.8, 4),
-            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.15 }));
-        trailGlow.rotation.x = Math.PI / 2; trailGlow.position.z = 0.5;
-        g.add(trailGlow);
 
         g.userData = { damage: bulletDamage, life: 2.5 };
         scene.add(g); bullets.push(g);
@@ -1061,10 +1022,10 @@
         // Camera shake
         if (shakeAmount > 0.01) {
             camera.position.x = (Math.random()-0.5) * shakeAmount * 2;
-            camera.position.y = 3.5 + (Math.random()-0.5) * shakeAmount;
+            camera.position.y = 14 + (Math.random()-0.5) * shakeAmount;
             shakeAmount *= 0.88;
         } else {
-            camera.position.x = 0; camera.position.y = 3.5; shakeAmount = 0;
+            camera.position.x = 0; camera.position.y = 14; shakeAmount = 0;
         }
 
         // Wave progress
@@ -1083,7 +1044,7 @@
         clearEntities();
         wave = 0; score = 0; coins = 0;
         squadCount = 1; weaponLevel = 0;
-        bulletSpeed = 35; pressure = 1.0;
+        bulletSpeed = 22; pressure = 1.0;
         upgrades = { weapon: 0, squad: 0 };
         applyWeapon();
         startScreen.classList.add('hidden'); startScreen.classList.remove('active');
