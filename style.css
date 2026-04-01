@@ -1,0 +1,134 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #0a0a1a;
+    overflow: hidden;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    touch-action: none;
+}
+
+canvas {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#ui-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.screen {
+    text-align: center;
+    color: #fff;
+    pointer-events: auto;
+}
+
+.screen.hidden {
+    display: none;
+}
+
+.screen h1 {
+    font-size: 3.5rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 30px rgba(0, 200, 255, 0.5);
+    margin-bottom: 0.5rem;
+    line-height: 1.1;
+}
+
+.subtitle {
+    color: #8af;
+    font-size: 1rem;
+    margin-bottom: 2rem;
+}
+
+button {
+    background: linear-gradient(135deg, #00c8ff, #0080ff);
+    border: none;
+    color: #fff;
+    font-size: 1.3rem;
+    font-weight: 700;
+    padding: 0.8rem 3rem;
+    border-radius: 50px;
+    cursor: pointer;
+    letter-spacing: 0.15em;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 4px 20px rgba(0, 150, 255, 0.4);
+}
+
+button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 30px rgba(0, 150, 255, 0.6);
+}
+
+button:active {
+    transform: scale(0.97);
+}
+
+.credit {
+    margin-top: 2rem;
+    font-size: 0.75rem;
+    color: #556;
+}
+
+.credit a {
+    color: #8af;
+    text-decoration: none;
+}
+
+#game-over-screen h1 {
+    color: #f44;
+    text-shadow: 0 0 30px rgba(255, 50, 50, 0.5);
+}
+
+#final-score, #final-wave {
+    font-size: 1.2rem;
+    color: #ccc;
+    margin: 0.3rem 0;
+}
+
+#hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 20px;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    display: none;
+}
+
+#hud > div {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 4px 12px;
+    border-radius: 6px;
+}
+
+@media (max-width: 600px) {
+    .screen h1 {
+        font-size: 2.2rem;
+    }
+    #hud {
+        font-size: 0.7rem;
+        padding: 8px 10px;
+    }
+}

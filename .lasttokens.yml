@@ -1,0 +1,15 @@
+# LastTokens Configuration
+# This file signals that this repo accepts AI-contributed PRs from the LastTokens pool.
+
+enabled: true
+maintainers:
+  - last-tokens-bot
+auto_merge: false
+task_queue: TASKQUEUE.md
+languages:
+  - javascript
+  - html
+  - css
+max_task_size: L
+require_ci_pass: true
+require_human_review: true

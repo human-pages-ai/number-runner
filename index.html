@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Number Shooter — LastTokens</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+    <div id="ui-overlay">
+        <div id="start-screen" class="screen">
+            <h1>NUMBER<br>SHOOTER</h1>
+            <p class="subtitle">Shoot the numbers. Clear the path. Don't get overrun.</p>
+            <button id="btn-start">PLAY</button>
+            <p class="credit">Powered by <a href="https://github.com/last-tokens">LastTokens</a> — built with leftover AI tokens</p>
+        </div>
+        <div id="game-over-screen" class="screen hidden">
+            <h1>GAME OVER</h1>
+            <p id="final-score"></p>
+            <p id="final-wave"></p>
+            <button id="btn-restart">PLAY AGAIN</button>
+        </div>
+    </div>
+    <div id="hud">
+        <div id="hud-score">SCORE: <span id="score-val">0</span></div>
+        <div id="hud-wave">WAVE: <span id="wave-val">1</span></div>
+        <div id="hud-shooters">SHOOTERS: <span id="shooters-val">1</span></div>
+        <div id="hud-power">POWER: <span id="power-val">1</span></div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
