@@ -1,5 +1,5 @@
 // Barrel Defense — LastTokens
-// Shoot barrels for upgrades. Shoot enemies to survive. The game that doesn't exist... until now.
+// Shoot barrels for upgrades. Shoot enemies to survive. The game from the fake ads — made real.
 
 (function () {
     'use strict';
@@ -11,13 +11,13 @@
 
     function initRenderer() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a2e);
-        scene.fog = new THREE.FogExp2(0x1a1a2e, 0.012);
+        scene.background = new THREE.Color(0x222233);
+        scene.fog = new THREE.Fog(0x222233, 30, 80);
 
-        // Angled top-down camera — enemies approach from far end
-        camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 200);
-        camera.position.set(0, 18, 14);
-        camera.lookAt(0, 0, -5);
+        // Behind-the-player camera looking forward down the road
+        camera = new THREE.PerspectiveCamera(55, W() / H(), 0.1, 200);
+        camera.position.set(0, 8, 12);
+        camera.lookAt(0, 1, -15);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(W(), H());
@@ -26,24 +26,25 @@
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
-        // Lights
-        scene.add(new THREE.AmbientLight(0x6688cc, 0.5));
+        // Ambient
+        scene.add(new THREE.AmbientLight(0x667788, 0.5));
 
-        const sun = new THREE.DirectionalLight(0xffeedd, 0.9);
-        sun.position.set(5, 25, 10);
+        // Main directional sun
+        const sun = new THREE.DirectionalLight(0xffeedd, 0.8);
+        sun.position.set(5, 20, 10);
         sun.castShadow = true;
-        sun.shadow.camera.left = -25;
-        sun.shadow.camera.right = 25;
-        sun.shadow.camera.top = 30;
-        sun.shadow.camera.bottom = -15;
+        sun.shadow.camera.left = -20;
+        sun.shadow.camera.right = 20;
+        sun.shadow.camera.top = 40;
+        sun.shadow.camera.bottom = -10;
         sun.shadow.mapSize.width = 1024;
         sun.shadow.mapSize.height = 1024;
         scene.add(sun);
 
-        // Orange point light at player position for warmth
-        const playerLight = new THREE.PointLight(0xff8844, 0.6, 20);
-        playerLight.position.set(0, 3, 5);
-        scene.add(playerLight);
+        // Warm fire-colored point light at player
+        const pLight = new THREE.PointLight(0xff8844, 0.8, 25);
+        pLight.position.set(0, 3, 6);
+        scene.add(pLight);
 
         window.addEventListener('resize', () => {
             camera.aspect = W() / H();
@@ -64,98 +65,87 @@
     const waveDisplay = document.getElementById('wave-display');
     const squadDisplay = document.getElementById('squad-display');
     const coinDisplay = document.getElementById('coin-display');
+    const weaponDisplay = document.getElementById('weapon-display');
     const hudEl = document.getElementById('hud');
     const waveBar = document.getElementById('wave-bar');
     const waveBarFill = document.getElementById('wave-bar-fill');
     const actionText = document.getElementById('action-text');
     const upgradeButtons = document.getElementById('upgrade-buttons');
 
-    // ─── Audio (Web Audio API) ──────────────────────────────────────
+    // ─── Audio ──────────────────────────────────────────────────────
     let audioCtx;
     function ensureAudio() {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-
     function playTone(freq, dur, type, vol, ramp) {
         ensureAudio();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = type || 'sine';
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        if (ramp) osc.frequency.linearRampToValueAtTime(ramp, audioCtx.currentTime + dur);
-        gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + dur);
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = type || 'sine';
+        o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        if (ramp) o.frequency.linearRampToValueAtTime(ramp, audioCtx.currentTime + dur);
+        g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(); o.stop(audioCtx.currentTime + dur);
     }
-
     function playNoise(dur, vol) {
         ensureAudio();
-        const bufSize = audioCtx.sampleRate * dur;
-        const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
-        const data = buf.getChannelData(0);
-        for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
-        const src = audioCtx.createBufferSource();
-        src.buffer = buf;
-        const gain = audioCtx.createGain();
-        gain.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-        src.connect(gain);
-        gain.connect(audioCtx.destination);
-        src.start();
+        const n = audioCtx.sampleRate * dur, buf = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * 0.5;
+        const s = audioCtx.createBufferSource(); s.buffer = buf;
+        const g = audioCtx.createGain();
+        g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        s.connect(g); g.connect(audioCtx.destination); s.start();
     }
-
     const SFX = {
         shoot: () => playNoise(0.03, 0.05),
         hit: () => playTone(200, 0.06, 'square', 0.08, 100),
         enemyDie: () => { playTone(120, 0.1, 'sine', 0.1); playNoise(0.05, 0.06); },
         barrelBreak: () => { playNoise(0.2, 0.15); playTone(400, 0.1, 'sine', 0.12, 800); },
-        upgrade: () => {
-            playTone(523, 0.08, 'sine', 0.1);
-            setTimeout(() => playTone(784, 0.12, 'sine', 0.12), 80);
-        },
-        waveClear: () => {
-            [523, 659, 784, 1047].forEach((f, i) => {
-                setTimeout(() => playTone(f, 0.15, 'sine', 0.1), i * 80);
-            });
-        },
-        gameOver: () => {
-            [330, 262, 220, 165].forEach((f, i) => {
-                setTimeout(() => playTone(f, 0.3, 'sine', 0.1), i * 180);
-            });
-        },
+        upgrade: () => { playTone(523, 0.08, 'sine', 0.1); setTimeout(() => playTone(784, 0.12, 'sine', 0.12), 80); },
+        waveClear: () => { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f,0.15,'sine',0.1), i*80)); },
+        gameOver: () => { [330,262,220,165].forEach((f,i) => setTimeout(() => playTone(f,0.3,'sine',0.1), i*180)); },
         coin: () => playTone(1200, 0.05, 'sine', 0.06, 1800),
     };
 
     // ─── Materials ──────────────────────────────────────────────────
     const MAT = {
-        ground: new THREE.MeshStandardMaterial({ color: 0x2a2a3e }),
-        arena: new THREE.MeshStandardMaterial({ color: 0x333350 }),
-        arenaLine: new THREE.MeshStandardMaterial({ color: 0x444466 }),
+        road: new THREE.MeshStandardMaterial({ color: 0x444455 }),
+        roadLine: new THREE.MeshBasicMaterial({ color: 0x666677 }),
+        wall: new THREE.MeshStandardMaterial({ color: 0x555566 }),
+        wallTop: new THREE.MeshStandardMaterial({ color: 0x666677 }),
+        skin: new THREE.MeshStandardMaterial({ color: 0xDDBB88 }),
+        skinDark: new THREE.MeshStandardMaterial({ color: 0xBB9966 }),
+        soldierBody: new THREE.MeshStandardMaterial({ color: 0x556B2F }),
+        soldierPants: new THREE.MeshStandardMaterial({ color: 0x3B4A28 }),
+        soldierBoots: new THREE.MeshStandardMaterial({ color: 0x333333 }),
+        soldierVest: new THREE.MeshStandardMaterial({ color: 0x4A5A30 }),
+        gun: new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.7, roughness: 0.3 }),
+        gunAccent: new THREE.MeshStandardMaterial({ color: 0x556633, metalness: 0.3 }),
+        zombieSkin: new THREE.MeshStandardMaterial({ color: 0x779966 }),
+        zombieClothes: new THREE.MeshStandardMaterial({ color: 0x665544 }),
+        zombieDark: new THREE.MeshStandardMaterial({ color: 0x554433 }),
         barrel: new THREE.MeshStandardMaterial({ color: 0x8B5E3C, metalness: 0.2, roughness: 0.7 }),
-        barrelRing: new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.5 }),
-        barrelGold: new THREE.MeshStandardMaterial({ color: 0xDAA520, metalness: 0.6, roughness: 0.3 }),
-        enemy: new THREE.MeshStandardMaterial({ color: 0xCC3333 }),
-        enemySkin: new THREE.MeshStandardMaterial({ color: 0xDDBB88 }),
-        ally: new THREE.MeshStandardMaterial({ color: 0x3377DD }),
-        allySkin: new THREE.MeshStandardMaterial({ color: 0xFFDCB0 }),
-        gun: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.7, roughness: 0.3 }),
+        barrelRing: new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.5 }),
+        crate: new THREE.MeshStandardMaterial({ color: 0x6B5B3C }),
+        crateEdge: new THREE.MeshStandardMaterial({ color: 0x555544 }),
         bullet: new THREE.MeshBasicMaterial({ color: 0xffee44 }),
-        bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5 }),
-        particle: new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: true }),
+        bulletGlow: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.4 }),
+        muzzleFlash: new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.8 }),
+        firePart: new THREE.MeshBasicMaterial({ color: 0xff6622, transparent: true }),
         coin: new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.8, roughness: 0.2 }),
+        selCircle: new THREE.MeshBasicMaterial({ color: 0x44ddff, transparent: true, opacity: 0.4 }),
     };
 
     // ─── Difficulty ─────────────────────────────────────────────────
     const DIFF = {
-        easy:   { enemySpeed: 1.5, enemyHP: 0.6, spawnRate: 0.7, barrelRate: 1.3, coins: 1.5, label: 'EASY' },
-        normal: { enemySpeed: 2.2, enemyHP: 1.0, spawnRate: 1.0, barrelRate: 1.0, coins: 1.0, label: 'NORMAL' },
-        hard:   { enemySpeed: 3.0, enemyHP: 1.4, spawnRate: 1.4, barrelRate: 0.7, coins: 0.7, label: 'HARD' },
+        easy:   { enemySpeed: 1.5, enemyHP: 0.6, spawnRate: 0.7, barrelRate: 1.3, coins: 1.5 },
+        normal: { enemySpeed: 2.2, enemyHP: 1.0, spawnRate: 1.0, barrelRate: 1.0, coins: 1.0 },
+        hard:   { enemySpeed: 3.0, enemyHP: 1.4, spawnRate: 1.4, barrelRate: 0.7, coins: 0.7 },
     };
     let diff = DIFF.normal;
-
     document.querySelectorAll('.diff-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('selected'));
@@ -164,575 +154,452 @@
         });
     });
 
-    // ─── Game State ─────────────────────────────────────────────────
-    let state = 'menu'; // menu | playing | waveclear | gameover
-    let wave = 0;
-    let score = 0;
-    let coins = 0;
-
-    // Player squad
-    let squad = [];       // array of shooter objects in scene
-    let squadCount = 1;
-    let fireRate = 2.5;   // shots per second per shooter
-    let bulletDamage = 1;
-    let bulletSpeed = 30;
-    let weaponLevel = 0;  // 0=pistol, 1=smg, 2=shotgun, 3=machinegun, 4=minigun
-
+    // ─── Weapons ────────────────────────────────────────────────────
     const WEAPONS = [
-        { name: 'Pistol',      damage: 1, fireRate: 2.5, bullets: 1, spread: 0, color: 0xffee44, size: 0.10 },
-        { name: 'SMG',         damage: 1, fireRate: 5,   bullets: 1, spread: 0, color: 0xffaa22, size: 0.12 },
-        { name: 'Shotgun',     damage: 3, fireRate: 1.8, bullets: 1, spread: 0, color: 0xff6622, size: 0.18 },
-        { name: 'Machine Gun', damage: 2, fireRate: 8,   bullets: 1, spread: 0, color: 0xff4400, size: 0.14 },
-        { name: 'Minigun',     damage: 4, fireRate: 12,  bullets: 1, spread: 0, color: 0xff2200, size: 0.16 },
+        { name: 'Pistol',      damage: 1, fireRate: 2.5, color: 0xffee44, size: 0.10 },
+        { name: 'SMG',         damage: 1, fireRate: 5.0, color: 0xffaa22, size: 0.11 },
+        { name: 'Shotgun',     damage: 3, fireRate: 1.8, color: 0xff8822, size: 0.14 },
+        { name: 'Machine Gun', damage: 2, fireRate: 8.0, color: 0xff5500, size: 0.13 },
+        { name: 'Minigun',     damage: 4, fireRate: 12,  color: 0xff2200, size: 0.15 },
     ];
 
-    // Upgrades
-    let upgrades = {
-        damage: 0,
-        fireRate: 0,
-        squad: 0,
-        range: 0,
-    };
+    // ─── Game State ─────────────────────────────────────────────────
+    let state = 'menu';
+    let wave = 0, score = 0, coins = 0;
+    let squadCount = 1, weaponLevel = 0;
+    let bulletDamage = 1, fireRate = 2.5, bulletSpeed = 35;
+    let pressure = 1.0, squadAtWaveStart = 1;
+    let upgrades = { weapon: 0, squad: 0 };
 
-    // Entities
-    let enemies = [];
-    let barrels = [];
-    let bullets = [];
-    let particles = [];
+    let squad = [], enemies = [], barrels = [], bullets = [], particles = [];
     let coinPickups = [];
-    let aimX = 0;       // aim position X (world coords)
-    let fireCooldown = 0;
-    let shakeAmount = 0;
+    let aimX = 0, fireCooldown = 0, shakeAmount = 0;
+    let waveEnemiesLeft = 0, waveEnemiesTotal = 0, waveBarrelsLeft = 0;
+    let spawnTimer = 0, barrelTimer = 0;
+    let muzzleFlashes = [];
 
-    // Wave config
-    let waveEnemiesLeft = 0;
-    let waveEnemiesTotal = 0;
-    let waveBarrelsLeft = 0;
-    let spawnTimer = 0;
-    let barrelTimer = 0;
+    const ROAD_W = 8;
+    const DEFENSE_Z = 2;
+    const SPAWN_Z_MIN = -55;
+    const SPAWN_Z_MAX = -25;
 
-    // Adaptive difficulty — scales up when player is cruising, eases off when struggling
-    let pressure = 1.0;       // multiplier on enemy count/HP/speed
-    let squadAtWaveStart = 1; // track losses
+    // ─── Road / Environment ─────────────────────────────────────────
+    let envMeshes = [];
 
-    // Defense line — enemies reaching this Z = damage
-    const DEFENSE_Z = 4;
-    const SPAWN_Z_MIN = -35;
-    const SPAWN_Z_MAX = -20;
-    const ARENA_WIDTH = 12;
+    function initEnvironment() {
+        envMeshes.forEach(m => scene.remove(m));
+        envMeshes = [];
 
-    // ─── Ground / Arena ─────────────────────────────────────────────
-    let groundMeshes = [];
+        // Road
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 100), MAT.road);
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(0, -0.01, -25);
+        road.receiveShadow = true;
+        scene.add(road); envMeshes.push(road);
 
-    function initArena() {
-        groundMeshes.forEach(m => scene.remove(m));
-        groundMeshes = [];
+        // Center line (dashed)
+        for (let z = 5; z > -70; z -= 4) {
+            const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 1.5), MAT.roadLine);
+            dash.rotation.x = -Math.PI / 2;
+            dash.position.set(0, 0.01, z);
+            scene.add(dash); envMeshes.push(dash);
+        }
 
-        // Large ground plane
-        const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(80, 120),
-            MAT.ground
-        );
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.set(0, -0.1, -20);
-        ground.receiveShadow = true;
-        scene.add(ground);
-        groundMeshes.push(ground);
-
-        // Arena floor (lighter)
-        const arena = new THREE.Mesh(
-            new THREE.PlaneGeometry(ARENA_WIDTH, 50),
-            MAT.arena
-        );
-        arena.rotation.x = -Math.PI / 2;
-        arena.position.set(0, -0.05, -10);
-        arena.receiveShadow = true;
-        scene.add(arena);
-        groundMeshes.push(arena);
-
-        // Defense line marker
-        const line = new THREE.Mesh(
-            new THREE.PlaneGeometry(ARENA_WIDTH + 2, 0.15),
-            new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.6 })
-        );
-        line.rotation.x = -Math.PI / 2;
-        line.position.set(0, 0.01, DEFENSE_Z);
-        scene.add(line);
-        groundMeshes.push(line);
-
-        // Side walls (visual only)
+        // Side walls
         for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(
-                new THREE.BoxGeometry(0.3, 1.5, 50),
-                MAT.arenaLine
-            );
-            wall.position.set(side * (ARENA_WIDTH / 2 + 0.15), 0.5, -10);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3, 100), MAT.wall);
+            wall.position.set(side * (ROAD_W / 2 + 0.25), 1.5, -25);
             wall.castShadow = true;
-            scene.add(wall);
-            groundMeshes.push(wall);
+            scene.add(wall); envMeshes.push(wall);
+
+            // Wall cap
+            const cap = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 100), MAT.wallTop);
+            cap.position.set(side * (ROAD_W / 2 + 0.25), 3, -25);
+            scene.add(cap); envMeshes.push(cap);
+        }
+
+        // Ground beyond walls
+        for (const side of [-1, 1]) {
+            const gnd = new THREE.Mesh(new THREE.PlaneGeometry(30, 100),
+                new THREE.MeshStandardMaterial({ color: 0x333344 }));
+            gnd.rotation.x = -Math.PI / 2;
+            gnd.position.set(side * 19, -0.05, -25);
+            scene.add(gnd); envMeshes.push(gnd);
         }
     }
 
-    // ─── Pixel Art Sprites ────────────────────────────────────────
-    // 16x16 pixel art drawn pixel-by-pixel, scaled up with nearest-neighbor for crisp retro look
-    const charTexCache = {};
+    // ─── 3D Character Models ────────────────────────────────────────
 
-    // Color palette
-    const P = {
-        _: null,               // transparent
-        K: '#111111',          // black outline
-        S: '#EEBB88',          // skin
-        Sd: '#CC9966',         // skin shadow
-        // Warrior colors
-        B: '#3377DD',          // blue armor
-        Bd: '#2255AA',         // blue dark
-        Bl: '#55AAFF',         // blue light
-        G: '#444444',          // gun metal
-        Gd: '#333333',         // gun dark
-        Gl: '#666666',         // gun light
-        R: '#CC3333',          // red bandana
-        Rd: '#992222',         // red dark
-        Y: '#FFD700',          // gold/yellow
-        Br: '#8B5E3C',         // brown leather
-        Brd: '#6B4423',        // brown dark
-        Gy: '#888888',         // grey
-        W: '#FFFFFF',          // white
-        Bl2: '#88CCEE',        // lens blue
-        Bk: '#555555',         // dark armor
-        // Viking colors
-        Vr: '#AA2222',         // viking red
-        Vrd: '#882222',        // viking red dark
-        Vb: '#654321',         // viking brown
-        Vbd: '#4A3015',        // viking brown dark
-        Vh: '#999999',         // helmet grey
-        Vhd: '#777777',        // helmet dark
-        F: '#F5DEB3',          // horn/fur
-        Fd: '#DAC298',         // horn dark
-        Be: '#D2691E',         // beard
-        Bed: '#A0521E',        // beard dark
-        Sh: '#8B7355',         // shield
-    };
+    function createSoldier() {
+        const g = new THREE.Group();
 
-    // 16x16 pixel art — warrior with gun (front-facing)
-    function getWarriorPixels(v) {
-        const _ = '_', K = 'K', S = 'S', Sd = 'Sd';
-        const B = v % 2 === 0 ? 'B' : 'Bl', Bd2 = 'Bd', G = 'G', Gd = 'Gd', Gl = 'Gl';
-        const R = 'R', Rd2 = 'Rd', Y = 'Y', Br = 'Br', Bk = 'Bk', Bl2 = 'Bl2', W = 'W';
-        return [
-            //0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
-            [_,  _,  _,  _,  _,  K, K, K, K, K, K, _,  _,  _,  _,  _],  // 0: bandana top
-            [_,  _,  _,  _,  K, R, R, R, R, R, R, K,  _,  _,  _,  _],  // 1: bandana
-            [_,  _,  _,  K, R, Rd2,R, R, R, Rd2,R, R,  K,  _,  _,  _],  // 2: bandana + goggles
-            [_,  _,  _,  K, Y, Bl2,Y, K, K, Y, Bl2,Y,  K,  _,  _,  _],  // 3: goggles
-            [_,  _,  _,  K, S, S, S, S, S, S, S, S,  K,  _,  _,  _],  // 4: face
-            [_,  _,  _,  K, S, K, S, S, S, S, K, S,  K,  _,  _,  _],  // 5: eyes
-            [_,  _,  _,  _,  K, S, S, Sd, Sd,S, S, K,  _,  _,  _,  _],  // 6: chin
-            [_,  _,  K, K, B, B, B, B, B, B, B, B,  K, K, _,  _],  // 7: shoulders
-            [_,  K, S, K, B, Bk, Bk,B, B, Bk,Bk,B,  K, G, K, _],  // 8: chest + arm + gun
-            [_,  K, S, K, B, Bk, Bk,B, B, Bk,Bk,B,  K, G, K, _],  // 9: chest
-            [_,  _,  K, K, B, B, B, B, B, B, B, B,  K, Gl,K, _],  // 10: waist + gun barrel
-            [_,  _,  _,  K, Br, Br,Y, Br,Br,Y, Br,Br, K, K, _,  _],  // 11: belt
-            [_,  _,  _,  K, Bd2,Bd2,Bd2,K, K, Bd2,Bd2,Bd2,K, _,  _,  _],  // 12: pants
-            [_,  _,  _,  K, Bd2,Bd2,Bd2,K, K, Bd2,Bd2,Bd2,K, _,  _,  _],  // 13: pants
-            [_,  _,  _,  K, K, K, K, _,  _,  K, K, K, K, _,  _,  _],  // 14: boots top
-            [_,  _,  K, K, Bk,Bk,K, _,  _,  K, Bk,Bk,K, K, _,  _],  // 15: boots
-        ];
-    }
+        // Legs
+        const legGeo = new THREE.CylinderGeometry(0.12, 0.14, 0.5, 6);
+        const legL = new THREE.Mesh(legGeo, MAT.soldierPants);
+        legL.position.set(-0.15, 0.25, 0); g.add(legL);
+        const legR = new THREE.Mesh(legGeo, MAT.soldierPants);
+        legR.position.set(0.15, 0.25, 0); g.add(legR);
 
-    // 16x16 pixel art — viking with axe and shield
-    function getVikingPixels(v) {
-        const _ = '_', K = 'K';
-        const Vh = 'Vh', Vhd = 'Vhd', F = 'F', Fd = 'Fd';
-        const S = 'S', Sd = 'Sd', Be = v % 2 === 0 ? 'Be' : 'Y';
-        const Vr = v % 2 === 0 ? 'Vr' : 'Vrd', Y = 'Y';
-        const Vb = 'Vb', Vbd = 'Vbd', Sh = 'Sh', Gy = 'Gy', W = 'W';
-        return [
-            [_,  _,  F,  _,  _,  K, K, K, K, K, K, _,  _,  F,  _,  _],  // 0: horns + helmet
-            [_,  F,  Fd, _,  K, Vh,Vh,Vh,Vh,Vh,Vh, K,  _,  Fd, F,  _],  // 1: horns + helmet
-            [_,  _,  _,  K, Vh,Vhd,Vh,Vh,Vh,Vhd,Vh,Vh, K,  _,  _,  _],  // 2: helmet
-            [_,  _,  _,  K, S, S, S, S, S, S, S, S,  K,  _,  _,  _],  // 3: face
-            [_,  _,  _,  K, S, W, K, S, S, K, W, S,  K,  _,  _,  _],  // 4: eyes (angry)
-            [_,  _,  _,  K, S, Be,Be,Be,Be,Be,Be,S,  K,  _,  _,  _],  // 5: beard
-            [_,  _,  _,  _,  K, Be,Be,Be,Be,Be,Be,K,  _,  _,  _,  _],  // 6: beard
-            [_,  K, Sh,K, Vr,Vr,Y, Vr,Vr,Y, Vr,Vr, K, Vb,K, _],  // 7: shoulders + shield + axe handle
-            [K,  Sh,Sh,K, Vr,Vr,Y, Vr,Vr,Y, Vr,Vr, K, Vb,K, _],  // 8: chest + shield
-            [K,  Sh,Y, K, Vr,Vr,Vr,Vr,Vr,Vr,Vr,Vr, K, Gy,Gy,K],  // 9: chest + shield boss + axe head
-            [K,  Sh,Sh,K, Vr,Vr,Y, Vr,Vr,Y, Vr,Vr, K, Gy,Gy,K],  // 10: waist + axe
-            [_,  K, Sh,K, Vb,Vb,Y, Vb,Vb,Y, Vb,Vb, K, Vb,K, _],  // 11: belt
-            [_,  _,  K, K, Vb,Vb,Vb,K, K, Vb,Vb,Vb, K, K, _,  _],  // 12: pants
-            [_,  _,  _,  K, Vb,Vb,Vb,K, K, Vb,Vb,Vb, K, _,  _,  _],  // 13: pants
-            [_,  _,  _,  K, F, F, K, _,  _,  K, F, F, K, _,  _,  _],  // 14: fur boots
-            [_,  _,  K, K, Sh,Sh,K, _,  _,  K, Sh,Sh,K, K, _,  _],  // 15: boots
-        ];
-    }
+        // Boots
+        const bootGeo = new THREE.BoxGeometry(0.18, 0.12, 0.25);
+        const bootL = new THREE.Mesh(bootGeo, MAT.soldierBoots);
+        bootL.position.set(-0.15, 0.06, 0.02); g.add(bootL);
+        const bootR = new THREE.Mesh(bootGeo, MAT.soldierBoots);
+        bootR.position.set(0.15, 0.06, 0.02); g.add(bootR);
 
-    function renderPixelSprite(pixels, size) {
-        const canvas = document.createElement('canvas');
-        const s = size || 8; // scale factor: each pixel = s screen pixels
-        canvas.width = 16 * s;
-        canvas.height = 16 * s;
-        const ctx = canvas.getContext('2d');
+        // Torso
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.5, 0.3), MAT.soldierBody);
+        torso.position.y = 0.75; g.add(torso);
 
-        for (let y = 0; y < 16; y++) {
-            for (let x = 0; x < 16; x++) {
-                const key = pixels[y][x];
-                if (key === '_') continue;
-                ctx.fillStyle = P[key];
-                ctx.fillRect(x * s, y * s, s, s);
-            }
-        }
-        return canvas;
-    }
+        // Vest/armor
+        const vest = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.35, 0.33), MAT.soldierVest);
+        vest.position.y = 0.8; g.add(vest);
 
-    function getCharTexture(type, variant) {
-        const key = type + variant;
-        if (charTexCache[key]) return charTexCache[key];
+        // Arms
+        const armGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.45, 6);
+        const armL = new THREE.Mesh(armGeo, MAT.soldierBody);
+        armL.position.set(-0.32, 0.7, 0); armL.rotation.z = 0.15; g.add(armL);
+        const armR = new THREE.Mesh(armGeo, MAT.soldierBody);
+        armR.position.set(0.32, 0.7, -0.1); armR.rotation.x = -0.8; g.add(armR);
 
-        const pixels = type === 'viking' ? getVikingPixels(variant) : getWarriorPixels(variant);
-        const canvas = renderPixelSprite(pixels, 8);
+        // Hands
+        const handGeo = new THREE.SphereGeometry(0.07, 6, 6);
+        const handR = new THREE.Mesh(handGeo, MAT.skin);
+        handR.position.set(0.32, 0.55, -0.3); g.add(handR);
 
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.minFilter = THREE.NearestFilter;
-        tex.magFilter = THREE.NearestFilter; // crisp pixel art, no smoothing
-        charTexCache[key] = tex;
-        return tex;
-    }
+        // Head
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), MAT.skin);
+        head.position.y = 1.15; g.add(head);
 
-    // ─── Create Entities ────────────────────────────────────────────
+        // Helmet
+        const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), MAT.soldierVest);
+        helmet.position.y = 1.2; helmet.scale.set(1, 0.8, 1); g.add(helmet);
 
-    function createCharSprite(x, z, type) {
-        const variant = Math.floor(Math.random() * 4);
-        const tex = getCharTexture(type, variant);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(1.8, 1.8, 1);
-        sprite.position.set(x, 0.9, z);
-        scene.add(sprite);
-        return sprite;
-    }
-
-    // Weapon meshes — visible 3D guns held by squad members
-    const WEAPON_GEO = [
-        // Pistol — small box
-        () => {
-            const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.3), MAT.gun));
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.2, 4), MAT.gun);
-            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.22);
-            g.add(barrel);
-            return g;
-        },
-        // SMG — longer body
-        () => {
-            const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.45), MAT.gun));
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25, 4), MAT.gun);
-            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.03, -0.32);
-            g.add(barrel);
-            const mag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.06), MAT.gun);
-            mag.position.set(0, -0.12, 0.05);
-            g.add(mag);
-            return g;
-        },
-        // Shotgun — wide barrel, pump grip
-        () => {
-            const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.55), MAT.gun));
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 6), MAT.gun);
-            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.03, -0.38);
-            g.add(barrel);
-            const pump = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.12),
-                new THREE.MeshStandardMaterial({ color: 0x8B5E3C }));
-            pump.position.set(0, -0.06, -0.1);
-            g.add(pump);
-            return g;
-        },
-        // Machine Gun — long with bipod
-        () => {
-            const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.65), MAT.gun));
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.35, 6), MAT.gun);
-            barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.03, -0.46);
-            g.add(barrel);
-            const box = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.14),
-                new THREE.MeshStandardMaterial({ color: 0x556633 }));
-            box.position.set(0, -0.1, 0.15);
-            g.add(box);
-            return g;
-        },
-        // Minigun — multi-barrel beast
-        () => {
-            const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.5), MAT.gun));
-            for (let i = 0; i < 4; i++) {
-                const angle = (i / 4) * Math.PI * 2;
-                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 4), MAT.gun);
-                barrel.rotation.x = Math.PI / 2;
-                barrel.position.set(Math.cos(angle) * 0.05, Math.sin(angle) * 0.05 + 0.02, -0.42);
-                g.add(barrel);
-            }
-            const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.14, 8),
-                new THREE.MeshStandardMaterial({ color: 0x556633 }));
-            drum.position.set(0, -0.12, 0.1);
-            g.add(drum);
-            return g;
-        },
-    ];
-
-    function createSquadMember(index) {
-        const spread = Math.min(squadCount - 1, 5) * 0.8;
-        const offsetX = squadCount === 1 ? 0 : -spread / 2 + (index / Math.max(1, squadCount - 1)) * spread;
-
-        const group = new THREE.Group();
-        group.position.set(aimX + offsetX, 0, DEFENSE_Z + 2);
-
-        // Character sprite
-        const variant = Math.floor(Math.random() * 4);
-        const tex = getCharTexture('warrior', variant);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        const charSprite = new THREE.Sprite(mat);
-        charSprite.scale.set(1.8, 1.8, 1);
-        charSprite.position.y = 0.9;
-        group.add(charSprite);
-
-        // Weapon mesh
-        const weapon = WEAPON_GEO[weaponLevel]();
-        weapon.position.set(0.4, 0.55, -0.3);
-        group.add(weapon);
-
-        group.userData = { index, offsetX, phase: Math.random() * Math.PI * 2, weapon };
-        scene.add(group);
-        return group;
-    }
-
-    function rebuildSquad() {
-        squad.forEach(s => scene.remove(s));
-        squad = [];
-        for (let i = 0; i < squadCount; i++) {
-            squad.push(createSquadMember(i));
-        }
-    }
-
-    function spawnEnemy(z, hp) {
-        // Each "enemy" is a horde of individual vikings — hp = viking count
-        const centerX = (Math.random() - 0.5) * (ARENA_WIDTH - 2);
-        const group = new THREE.Group();
-        group.position.set(centerX, 0, z);
-
-        const count = Math.min(hp, 30); // cap visual sprites for performance
-        const vikings = [];
-        const spread = Math.min(1.5, 0.3 + count * 0.08);
-        for (let i = 0; i < count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const radius = Math.sqrt(Math.random()) * spread;
-            const vx = Math.cos(angle) * radius;
-            const vz = Math.sin(angle) * radius;
-            const variant = Math.floor(Math.random() * 4);
-            const tex = getCharTexture('viking', variant);
-            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-            const sprite = new THREE.Sprite(mat);
-            sprite.scale.set(1.4, 1.4, 1);
-            sprite.position.set(vx, 0.9, vz);
-            sprite.userData.phase = Math.random() * Math.PI * 2;
-            sprite.userData.localX = vx;
-            sprite.userData.localZ = vz;
-            group.add(sprite);
-            vikings.push(sprite);
-        }
-
-        const speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.05);
-        const wobble = Math.random() * Math.PI * 2;
-
-        group.userData = { hp, maxHp: hp, speed, wobble, vikings };
-        scene.add(group);
-        enemies.push(group);
-    }
-
-    function spawnBarrel(z) {
-        const x = (Math.random() - 0.5) * (ARENA_WIDTH - 3);
-        const group = new THREE.Group();
-        group.position.set(x, 0, z);
-
-        // Barrel body
-        const body = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.6, 0.7, 1.2, 12),
-            MAT.barrel
+        // Selection circle under feet
+        const circle = new THREE.Mesh(
+            new THREE.RingGeometry(0.25, 0.35, 16),
+            MAT.selCircle
         );
-        body.position.y = 0.6;
-        body.castShadow = true;
-        group.add(body);
+        circle.rotation.x = -Math.PI / 2;
+        circle.position.y = 0.02;
+        g.add(circle);
 
-        // Metal rings
-        for (const ry of [0.2, 0.6, 1.0]) {
-            const ring = new THREE.Mesh(
-                new THREE.TorusGeometry(0.63, 0.04, 4, 12),
-                MAT.barrelRing
-            );
-            ring.position.y = ry;
-            ring.rotation.x = Math.PI / 2;
-            group.add(ring);
+        return g;
+    }
+
+    function createWeaponMesh(level) {
+        const g = new THREE.Group();
+        switch (level) {
+            case 0: // Pistol
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.25), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
+                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.15, 4), MAT.gun), { position: new THREE.Vector3(0, 0.03, -0.18) }));
+                g.children[1].rotation.x = Math.PI / 2;
+                break;
+            case 1: // SMG
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.35), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
+                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 4), MAT.gun), { position: new THREE.Vector3(0, 0.03, -0.25) }));
+                g.children[1].rotation.x = Math.PI / 2;
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.05), MAT.gun), { position: new THREE.Vector3(0, -0.1, 0.05) }));
+                break;
+            case 2: // Shotgun
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
+                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.25, 6), MAT.gun), { position: new THREE.Vector3(0, 0.02, -0.35) }));
+                g.children[1].rotation.x = Math.PI / 2;
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.1), MAT.gunAccent), { position: new THREE.Vector3(0, -0.05, -0.05) }));
+                break;
+            case 3: // Machine Gun
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.55), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
+                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), MAT.gun), { position: new THREE.Vector3(0, 0.03, -0.4) }));
+                g.children[1].rotation.x = Math.PI / 2;
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.12), MAT.gunAccent), { position: new THREE.Vector3(0, -0.08, 0.12) }));
+                break;
+            case 4: // Minigun
+                g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.45), MAT.gun), { position: new THREE.Vector3(0, 0, 0) }));
+                for (let i = 0; i < 4; i++) {
+                    const a = (i / 4) * Math.PI * 2;
+                    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4), MAT.gun);
+                    barrel.rotation.x = Math.PI / 2;
+                    barrel.position.set(Math.cos(a) * 0.04, Math.sin(a) * 0.04 + 0.02, -0.38);
+                    g.add(barrel);
+                }
+                g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), MAT.gunAccent), { position: new THREE.Vector3(0, -0.1, 0.08) }));
+                break;
+        }
+        return g;
+    }
+
+    function createZombie() {
+        const g = new THREE.Group();
+
+        // Legs
+        const legGeo = new THREE.CylinderGeometry(0.1, 0.12, 0.5, 5);
+        const legL = new THREE.Mesh(legGeo, MAT.zombieDark);
+        legL.position.set(-0.12, 0.25, 0); g.add(legL);
+        const legR = new THREE.Mesh(legGeo, MAT.zombieDark);
+        legR.position.set(0.12, 0.25, 0); g.add(legR);
+
+        // Torso
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.45, 0.25), MAT.zombieClothes);
+        torso.position.y = 0.7; g.add(torso);
+
+        // Arms (reaching forward — zombie pose)
+        const armGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.4, 5);
+        const armL = new THREE.Mesh(armGeo, MAT.zombieSkin);
+        armL.position.set(-0.28, 0.65, -0.15);
+        armL.rotation.x = -1.2; armL.rotation.z = 0.3;
+        g.add(armL);
+        const armR = new THREE.Mesh(armGeo, MAT.zombieSkin);
+        armR.position.set(0.28, 0.7, -0.2);
+        armR.rotation.x = -1.0; armR.rotation.z = -0.2;
+        g.add(armR);
+
+        // Head
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 7, 7), MAT.zombieSkin);
+        head.position.set(0, 1.05, 0);
+        head.scale.set(1, 1.1, 1);
+        g.add(head);
+
+        // Eyes (glowing red)
+        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2200 });
+        const eyeGeo = new THREE.SphereGeometry(0.03, 4, 4);
+        const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+        eyeL.position.set(-0.06, 1.07, -0.14); g.add(eyeL);
+        const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+        eyeR.position.set(0.06, 1.07, -0.14); g.add(eyeR);
+
+        g.userData = { legL, legR, armL, armR, phase: Math.random() * Math.PI * 2 };
+        return g;
+    }
+
+    function createBarrelObj(type) {
+        const g = new THREE.Group();
+
+        // Crate body (like in the screenshot)
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), MAT.crate);
+        crate.position.y = 0.6; crate.castShadow = true; g.add(crate);
+
+        // Crate edges
+        const edgeGeo = new THREE.BoxGeometry(1.25, 0.08, 1.25);
+        for (const y of [0.05, 1.15]) {
+            const edge = new THREE.Mesh(edgeGeo, MAT.crateEdge);
+            edge.position.y = y; g.add(edge);
         }
 
-        // Determine barrel type — allies and weapons are the exciting ones
-        const types = ['squad', 'weapon', 'coins', 'squad'];
-        const weights = [4, 3, 3, 3];
-        let total = weights.reduce((a, b) => a + b);
-        let r = Math.random() * total;
-        let type = types[0];
-        for (let i = 0; i < weights.length; i++) {
-            r -= weights[i];
-            if (r <= 0) { type = types[i]; break; }
-        }
-
-        const hp = Math.ceil((2 + wave * 1.0) * diff.enemyHP);
-        const colors = { squad: '#44ff88', weapon: '#ff4444', coins: '#ffdd44' };
-        const nextWeapon = weaponLevel < WEAPONS.length - 1 ? WEAPONS[weaponLevel + 1].name : 'MAX';
-        const labels = { squad: 'ALLY+', weapon: nextWeapon, coins: 'COINS' };
-
-        // Glow top
+        // Colored glow on top based on type
+        const colors = { squad: 0x44ff88, weapon: 0xff4444, coins: 0xffdd44 };
         const glow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.3, 8, 8),
+            new THREE.BoxGeometry(0.8, 0.05, 0.8),
             new THREE.MeshBasicMaterial({ color: colors[type], transparent: true, opacity: 0.7 })
         );
-        glow.position.y = 1.4;
-        group.add(glow);
+        glow.position.y = 1.22; g.add(glow);
 
-        // Label
-        const label = createTextSprite(labels[type], colors[type], 0.6);
-        label.position.set(0, 2, 0);
-        group.add(label);
-
-        // HP label
-        const hpLabel = createTextSprite(hp.toString(), '#ffffff', 0.5);
-        hpLabel.position.set(0, 0.6, 0.8);
-        group.add(hpLabel);
-
-        group.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.5, hpLabel, glow };
-        scene.add(group);
-        barrels.push(group);
-    }
-
-    function createBullet(fromX, fromZ, spreadX) {
-        const sx = spreadX || 0;
-        const dir = new THREE.Vector3(sx, 0, -1).normalize();
-
-        const w = WEAPONS[weaponLevel];
-        const bColor = w.color;
-
-        const group = new THREE.Group();
-        group.position.set(fromX, 1, fromZ);
-
-        const core = new THREE.Mesh(
-            new THREE.SphereGeometry(0.12, 6, 6),
-            new THREE.MeshBasicMaterial({ color: bColor })
+        // Side stripe color
+        const stripe = new THREE.Mesh(
+            new THREE.BoxGeometry(1.22, 0.3, 0.05),
+            new THREE.MeshBasicMaterial({ color: colors[type], transparent: true, opacity: 0.5 })
         );
-        group.add(core);
+        stripe.position.set(0, 0.6, 0.61); g.add(stripe);
+        const stripe2 = stripe.clone(); stripe2.position.z = -0.61; g.add(stripe2);
 
-        const glow = new THREE.Mesh(
-            new THREE.SphereGeometry(0.22, 6, 6),
-            new THREE.MeshBasicMaterial({ color: bColor, transparent: true, opacity: 0.4 })
-        );
-        group.add(glow);
-
-        group.userData = { dir, damage: bulletDamage, life: 2.5 };
-        scene.add(group);
-        bullets.push(group);
-    }
-
-    function fireWeapon(fromX, fromZ) {
-        createBullet(fromX, fromZ);
-        SFX.shoot();
-    }
-
-    function spawnParticles(x, y, z, color, count) {
-        for (let i = 0; i < count; i++) {
-            const mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(0.15, 0.15, 0.15),
-                new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
-            );
-            mesh.position.set(x, y, z);
-            mesh.userData = {
-                vel: new THREE.Vector3(
-                    (Math.random() - 0.5) * 6,
-                    Math.random() * 5 + 2,
-                    (Math.random() - 0.5) * 6
-                ),
-                life: 0.6 + Math.random() * 0.4,
-            };
-            scene.add(mesh);
-            particles.push(mesh);
-        }
-    }
-
-    function spawnCoinPickup(x, z, amount) {
-        const mesh = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.3, 0.3, 0.1, 8),
-            MAT.coin
-        );
-        mesh.rotation.x = Math.PI / 2;
-        mesh.position.set(x, 1.5, z);
-        mesh.userData = { amount, life: 2, vy: 3 };
-        scene.add(mesh);
-        coinPickups.push(mesh);
+        return g;
     }
 
     // ─── Text Sprites ───────────────────────────────────────────────
     function createTextSprite(text, color, scale) {
         const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 128;
+        canvas.width = 256; canvas.height = 128;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = color;
-        ctx.font = 'bold 72px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-        ctx.lineWidth = 5;
+        ctx.font = 'bold 80px system-ui';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 6;
         ctx.strokeText(text, 128, 64);
-        ctx.fillText(text, 128, 64);
-
+        ctx.fillStyle = color; ctx.fillText(text, 128, 64);
         const tex = new THREE.CanvasTexture(canvas);
-        const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        const sprite = new THREE.Sprite(spriteMat);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(mat);
         sprite.scale.set(scale * 2, scale, 1);
-        sprite.userData.canvas = canvas;
-        sprite.userData.ctx = ctx;
-        sprite.userData.tex = tex;
+        sprite.userData = { canvas, ctx, tex };
         return sprite;
     }
 
     function updateSpriteText(sprite, text, color) {
         const { canvas, ctx, tex } = sprite.userData;
         ctx.clearRect(0, 0, 256, 128);
-        ctx.fillStyle = color || '#ffffff';
-        ctx.font = 'bold 72px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-        ctx.lineWidth = 5;
+        ctx.font = 'bold 80px system-ui';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 6;
         ctx.strokeText(text, 128, 64);
-        ctx.fillText(text, 128, 64);
+        ctx.fillStyle = color || '#fff'; ctx.fillText(text, 128, 64);
         tex.needsUpdate = true;
+    }
+
+    // ─── Entity Spawning ────────────────────────────────────────────
+
+    function spawnSquadMember(index) {
+        const soldier = createSoldier();
+        const spread = Math.min(squadCount - 1, 5) * 0.9;
+        const ox = squadCount === 1 ? 0 : -spread / 2 + (index / Math.max(1, squadCount - 1)) * spread;
+
+        // Attach weapon
+        const weapon = createWeaponMesh(weaponLevel);
+        weapon.position.set(0.25, 0.55, -0.25);
+        soldier.add(weapon);
+
+        soldier.position.set(aimX + ox, 0, DEFENSE_Z + 1);
+        soldier.userData.offsetX = ox;
+        soldier.userData.weapon = weapon;
+        soldier.userData.phase = Math.random() * Math.PI * 2;
+        scene.add(soldier);
+        return soldier;
+    }
+
+    function rebuildSquad() {
+        squad.forEach(s => scene.remove(s));
+        squad = [];
+        for (let i = 0; i < squadCount; i++) squad.push(spawnSquadMember(i));
+    }
+
+    function spawnEnemy(z, hp) {
+        const cx = (Math.random() - 0.5) * (ROAD_W - 2);
+        const group = new THREE.Group();
+        group.position.set(cx, 0, z);
+
+        const count = Math.min(hp, 25);
+        const zombies = [];
+        const spread = Math.min(1.8, 0.3 + count * 0.1);
+        for (let i = 0; i < count; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.sqrt(Math.random()) * spread;
+            const zombie = createZombie();
+            zombie.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+            zombie.rotation.y = Math.PI; // face the player
+            group.add(zombie);
+            zombies.push(zombie);
+        }
+
+        const speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.04);
+        group.userData = { hp, maxHp: hp, speed, wobble: Math.random() * Math.PI * 2, zombies };
+        scene.add(group);
+        enemies.push(group);
+    }
+
+    function spawnBarrel(z) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const x = side * (ROAD_W / 2 - 1.2) * (0.3 + Math.random() * 0.7);
+
+        const types = ['squad', 'weapon', 'coins', 'squad'];
+        const weights = [4, 3, 3, 3];
+        let total = weights.reduce((a, b) => a + b), r = Math.random() * total, type = types[0];
+        for (let i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) { type = types[i]; break; } }
+
+        const hp = Math.ceil((2 + wave * 1.0) * diff.enemyHP);
+        const labels = { squad: 'ALLY+', weapon: weaponLevel < WEAPONS.length - 1 ? WEAPONS[weaponLevel + 1].name : 'MAX', coins: 'COINS' };
+
+        const crate = createBarrelObj(type);
+        crate.position.set(x, 0, z);
+
+        // HP number on front (big, like screenshot)
+        const hpLabel = createTextSprite(hp.toString(), '#ffffff', 1.0);
+        hpLabel.position.set(0, 1.8, 0);
+        crate.add(hpLabel);
+
+        // Type label
+        const typeLabel = createTextSprite(labels[type], type === 'squad' ? '#44ff88' : type === 'weapon' ? '#ff4444' : '#ffdd44', 0.5);
+        typeLabel.position.set(0, 2.5, 0);
+        crate.add(typeLabel);
+
+        crate.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.35, hpLabel };
+        scene.add(crate);
+        barrels.push(crate);
+    }
+
+    function createBullet(fromX, fromZ) {
+        const w = WEAPONS[weaponLevel];
+        const g = new THREE.Group();
+        g.position.set(fromX, 0.7, fromZ);
+        const core = new THREE.Mesh(new THREE.SphereGeometry(w.size, 6, 6),
+            new THREE.MeshBasicMaterial({ color: w.color }));
+        g.add(core);
+        const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 2, 6, 6),
+            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.3 }));
+        g.add(glow);
+
+        // Trail
+        const trail = new THREE.Mesh(
+            new THREE.CylinderGeometry(w.size * 0.5, w.size * 0.3, 0.5, 4),
+            new THREE.MeshBasicMaterial({ color: w.color, transparent: true, opacity: 0.5 }));
+        trail.rotation.x = Math.PI / 2; trail.position.z = 0.3;
+        g.add(trail);
+
+        g.userData = { damage: bulletDamage, life: 2.5 };
+        scene.add(g); bullets.push(g);
+    }
+
+    function spawnMuzzleFlash(x, z) {
+        const flash = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 6, 6), MAT.muzzleFlash
+        );
+        flash.position.set(x, 0.7, z - 0.5);
+        flash.userData = { life: 0.06 };
+        scene.add(flash);
+        muzzleFlashes.push(flash);
+    }
+
+    function spawnParticles(x, y, z, color, count) {
+        for (let i = 0; i < count; i++) {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.12, 0.12, 0.12),
+                new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
+            );
+            mesh.position.set(x, y, z);
+            mesh.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*5, Math.random()*5+2, (Math.random()-0.5)*5),
+                life: 0.5 + Math.random() * 0.4,
+            };
+            scene.add(mesh); particles.push(mesh);
+        }
+    }
+
+    function spawnExplosion(x, z) {
+        // Fire particles
+        for (let i = 0; i < 15; i++) {
+            const colors = [0xff4400, 0xff8800, 0xffcc00, 0xff2200];
+            const c = colors[Math.floor(Math.random() * colors.length)];
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(0.1 + Math.random() * 0.15, 5, 5),
+                new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 1 })
+            );
+            mesh.position.set(x, 0.5 + Math.random(), z);
+            mesh.userData = {
+                vel: new THREE.Vector3((Math.random()-0.5)*4, Math.random()*6+3, (Math.random()-0.5)*4),
+                life: 0.3 + Math.random() * 0.5,
+            };
+            scene.add(mesh); particles.push(mesh);
+        }
+    }
+
+    function spawnCoinPickup(x, z, amount) {
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.08, 8), MAT.coin);
+        mesh.rotation.x = Math.PI / 2;
+        mesh.position.set(x, 1.5, z);
+        mesh.userData = { amount, life: 1.5, vy: 3 };
+        scene.add(mesh); coinPickups.push(mesh);
     }
 
     // ─── Wave System ────────────────────────────────────────────────
     function startWave() {
         wave++;
-        // Exponential enemy scaling, amplified by adaptive pressure
-        // More hordes since each is smaller (individual vikings)
         const baseCount = 8 + wave * 5 + wave * wave * 1.0;
         const enemyCount = Math.floor(baseCount * diff.spawnRate * pressure);
         const barrelCount = Math.floor((2 + Math.min(wave * 0.6, 5)) * diff.barrelRate);
         waveEnemiesLeft = enemyCount;
         waveEnemiesTotal = enemyCount;
         waveBarrelsLeft = barrelCount;
-        spawnTimer = 0;
-        barrelTimer = 0;
+        spawnTimer = 0; barrelTimer = 0;
 
         state = 'playing';
         hudEl.style.display = 'flex';
         waveBar.style.display = 'block';
-
         squadAtWaveStart = squadCount;
         rebuildSquad();
         updateHUD();
@@ -745,8 +612,9 @@
         bullets.forEach(b => scene.remove(b));
         particles.forEach(p => scene.remove(p));
         coinPickups.forEach(c => scene.remove(c));
+        muzzleFlashes.forEach(m => scene.remove(m));
         squad.forEach(s => scene.remove(s));
-        enemies = []; barrels = []; bullets = []; particles = []; coinPickups = []; squad = [];
+        enemies=[]; barrels=[]; bullets=[]; particles=[]; coinPickups=[]; muzzleFlashes=[]; squad=[];
     }
 
     // ─── Upgrades ───────────────────────────────────────────────────
@@ -756,31 +624,29 @@
             maxLevel: WEAPONS.length - 1,
             cost: lvl => 10 + lvl * 15,
             apply: lvl => { weaponLevel = lvl; applyWeapon(); },
-            desc: lvl => `${WEAPONS[lvl].name} → ${WEAPONS[lvl + 1].name}`,
+            desc: lvl => `${WEAPONS[lvl].name} → ${WEAPONS[lvl+1].name}`,
         },
         {
             id: 'squad', name: 'Extra Shooter',
             maxLevel: 8,
             cost: lvl => 8 + lvl * 8,
             apply: lvl => { squadCount = 1 + lvl; },
-            desc: lvl => `${1 + lvl} → ${2 + lvl} shooters`,
+            desc: lvl => `${1+lvl} → ${2+lvl} shooters`,
         },
     ];
 
+    function applyWeapon() {
+        const w = WEAPONS[weaponLevel];
+        bulletDamage = w.damage;
+        fireRate = w.fireRate;
+    }
+
     function showUpgradeShop() {
-        // Adaptive difficulty: adjust pressure based on how the wave went
-        const lostMembers = squadAtWaveStart - squadCount;
-        if (lostMembers === 0 && squadCount >= 3) {
-            // Cruising — ramp up significantly
-            pressure = Math.min(pressure + 0.25, 3.0);
-        } else if (lostMembers === 0) {
-            // No losses but small squad — gentle ramp
-            pressure = Math.min(pressure + 0.1, 3.0);
-        } else if (lostMembers >= 2) {
-            // Struggling — ease off
-            pressure = Math.max(pressure - 0.15, 0.6);
-        }
-        // pressure stays the same if exactly 1 member lost (balanced)
+        // Adaptive difficulty
+        const lost = squadAtWaveStart - squadCount;
+        if (lost === 0 && squadCount >= 3) pressure = Math.min(pressure + 0.25, 3.0);
+        else if (lost === 0) pressure = Math.min(pressure + 0.1, 3.0);
+        else if (lost >= 2) pressure = Math.max(pressure - 0.15, 0.6);
 
         state = 'waveclear';
         wsWave.textContent = wave;
@@ -795,37 +661,29 @@
             const lvl = upgrades[def.id];
             const maxed = lvl >= def.maxLevel;
             const cost = def.cost(lvl);
-            const canAfford = coins >= cost;
             const btn = document.createElement('button');
             btn.className = 'upgrade-btn' + (maxed ? ' maxed' : '');
             btn.innerHTML = `${def.name}<br><small>${maxed ? 'MAXED' : def.desc(lvl)}</small><span class="cost">${maxed ? '' : cost + ' coins'}</span>`;
-            if (!maxed && canAfford) {
+            if (!maxed && coins >= cost) {
                 btn.addEventListener('click', () => {
-                    coins -= cost;
-                    upgrades[def.id]++;
+                    coins -= cost; upgrades[def.id]++;
                     def.apply(upgrades[def.id]);
                     SFX.upgrade();
-                    showUpgradeShop(); // refresh
+                    showUpgradeShop();
                 });
-            } else if (!maxed) {
-                btn.style.opacity = '0.5';
-            }
+            } else if (!maxed) btn.style.opacity = '0.5';
             upgradeButtons.appendChild(btn);
         });
     }
 
     // ─── Effects ────────────────────────────────────────────────────
-    function shake(amount) { shakeAmount = Math.max(shakeAmount, amount); }
-
+    function shake(amt) { shakeAmount = Math.max(shakeAmount, amt); }
     function showActionText(text, color) {
         actionText.textContent = text;
         actionText.style.color = color || '#fff';
         actionText.classList.add('show');
         setTimeout(() => actionText.classList.remove('show'), 1200);
     }
-
-    const weaponDisplay = document.getElementById('weapon-display');
-
     function updateHUD() {
         waveDisplay.textContent = wave;
         squadDisplay.textContent = squadCount;
@@ -833,156 +691,149 @@
         weaponDisplay.textContent = WEAPONS[weaponLevel].name;
     }
 
+    function applyBarrelReward(type, x, z) {
+        switch (type) {
+            case 'weapon':
+                if (weaponLevel < WEAPONS.length - 1) {
+                    weaponLevel++; applyWeapon(); rebuildSquad();
+                    showActionText(WEAPONS[weaponLevel].name.toUpperCase() + '!', '#ff4444');
+                } else {
+                    const a = Math.ceil((8 + wave * 3) * diff.coins);
+                    coins += a; spawnCoinPickup(x, z, a);
+                    showActionText('+' + a + ' COINS', '#ffdd44');
+                }
+                break;
+            case 'squad':
+                squadCount++; upgrades.squad++; rebuildSquad();
+                showActionText('+1 ALLY!', '#44ff88');
+                break;
+            case 'coins':
+                const amount = Math.ceil((5 + wave * 2) * diff.coins);
+                coins += amount; spawnCoinPickup(x, z, amount);
+                showActionText('+' + amount + ' COINS', '#ffdd44');
+                break;
+        }
+        shake(0.3); SFX.upgrade();
+    }
+
     // ─── Main Update ────────────────────────────────────────────────
     function update(dt) {
         if (state !== 'playing') return;
         const time = Date.now() * 0.001;
 
-        // ── Spawn enemies ──
-        // Spawn faster as waves progress, enemies get tankier
-        const spawnInterval = Math.max(0.25, 2.0 - wave * 0.15) / diff.spawnRate;
+        // Spawn enemies
+        const spawnInt = Math.max(0.25, 2.0 - wave * 0.15) / diff.spawnRate;
         spawnTimer += dt;
-        if (waveEnemiesLeft > 0 && spawnTimer >= spawnInterval) {
+        if (waveEnemiesLeft > 0 && spawnTimer >= spawnInt) {
             spawnTimer = 0;
-            // HP = number of visible vikings in the horde
             const hp = Math.ceil((1 + wave * 0.8 + Math.random() * wave * 0.5) * diff.enemyHP * (0.7 + pressure * 0.3));
-            const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
-            spawnEnemy(z, hp);
+            spawnEnemy(SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN), hp);
             waveEnemiesLeft--;
         }
 
-        // ── Spawn barrels ──
-        const barrelInterval = Math.max(1.5, 4 - wave * 0.15) / diff.barrelRate;
+        // Spawn barrels
+        const bInt = Math.max(1.5, 4 - wave * 0.15) / diff.barrelRate;
         barrelTimer += dt;
-        if (waveBarrelsLeft > 0 && barrelTimer >= barrelInterval) {
+        if (waveBarrelsLeft > 0 && barrelTimer >= bInt) {
             barrelTimer = 0;
-            const z = SPAWN_Z_MIN + Math.random() * 5;
-            spawnBarrel(z);
+            spawnBarrel(SPAWN_Z_MIN + Math.random() * 5);
             waveBarrelsLeft--;
         }
 
-        // ── Move enemy hordes toward defense line ──
+        // Move enemy hordes
         for (let i = enemies.length - 1; i >= 0; i--) {
             const e = enemies[i];
-            // Slow steady march + wobble
             e.position.z += e.userData.speed * dt;
-            e.position.x += Math.sin(time * 2 + e.userData.wobble) * 0.3 * dt;
-            e.position.x = Math.max(-ARENA_WIDTH / 2 + 1, Math.min(ARENA_WIDTH / 2 - 1, e.position.x));
+            e.position.x += Math.sin(time * 1.5 + e.userData.wobble) * 0.2 * dt;
+            e.position.x = Math.max(-ROAD_W/2+1, Math.min(ROAD_W/2-1, e.position.x));
 
-            // Animate individual vikings in the horde
-            for (const v of e.userData.vikings) {
-                v.position.y = 0.9 + Math.abs(Math.sin(time * 3 + v.userData.phase)) * 0.12;
-                v.position.x = v.userData.localX + Math.sin(time * 1.5 + v.userData.phase) * 0.1;
+            // Animate zombies
+            for (const z of e.userData.zombies) {
+                const p = z.userData.phase;
+                z.position.y = Math.abs(Math.sin(time * 3 + p)) * 0.08;
+                // Shambling walk
+                if (z.userData.legL) {
+                    z.userData.legL.rotation.x = Math.sin(time * 4 + p) * 0.4;
+                    z.userData.legR.rotation.x = -Math.sin(time * 4 + p) * 0.4;
+                    z.userData.armL.rotation.x = -1.2 + Math.sin(time * 2 + p) * 0.2;
+                    z.userData.armR.rotation.x = -1.0 + Math.sin(time * 2.5 + p + 1) * 0.2;
+                }
             }
 
-            // Reached defense line?
+            // Reached defense line
             if (e.position.z >= DEFENSE_Z) {
-                // Each surviving viking in the horde kills a squad member
-                const remaining = e.userData.hp;
-                for (let k = 0; k < remaining && squad.length > 0; k++) {
+                const rem = e.userData.hp;
+                for (let k = 0; k < rem && squad.length > 0; k++) {
                     const lost = squad.pop();
-                    spawnParticles(lost.position.x, 1, lost.position.z, 0x3377DD, 6);
+                    spawnParticles(lost.position.x, 0.5, lost.position.z, 0x556B2F, 8);
                     scene.remove(lost);
                     squadCount = Math.max(0, squadCount - 1);
                     upgrades.squad = Math.max(0, upgrades.squad - 1);
                 }
                 shake(0.6);
-
-                // Remove enemy horde
-                scene.remove(e);
-                enemies.splice(i, 1);
-                spawnParticles(e.position.x, 1, DEFENSE_Z, 0xff4444, 8);
-
-                if (squadCount <= 0) {
-                    doGameOver();
-                    return;
-                }
+                scene.remove(e); enemies.splice(i, 1);
+                spawnExplosion(e.position.x, DEFENSE_Z);
+                if (squadCount <= 0) { doGameOver(); return; }
             }
         }
 
-        // ── Move barrels ──
+        // Move barrels/crates
         for (let i = barrels.length - 1; i >= 0; i--) {
             const b = barrels[i];
             b.position.z += b.userData.speed * dt;
-            // Rotate barrel slightly
-            b.rotation.y += dt * 0.5;
-            // Glow pulse
-            if (b.userData.glow) {
-                b.userData.glow.material.opacity = 0.5 + Math.sin(time * 4) * 0.3;
-            }
-
-            // Past defense line = lost barrel
-            if (b.position.z >= DEFENSE_Z + 3) {
-                scene.remove(b);
-                barrels.splice(i, 1);
-            }
+            if (b.position.z >= DEFENSE_Z + 5) { scene.remove(b); barrels.splice(i, 1); }
         }
 
-        // ── Fire straight ahead ──
+        // Fire
         fireCooldown -= dt;
-
         if (fireCooldown <= 0 && (enemies.length > 0 || barrels.length > 0)) {
-            // Each squad member fires their weapon
             for (const s of squad) {
-                fireWeapon(s.position.x, s.position.z);
+                createBullet(s.position.x, s.position.z);
+                spawnMuzzleFlash(s.position.x, s.position.z);
             }
             fireCooldown = 1 / fireRate;
+            SFX.shoot();
         }
 
-        // ── Move bullets ──
+        // Move bullets
         for (let i = bullets.length - 1; i >= 0; i--) {
             const b = bullets[i];
-            b.position.add(b.userData.dir.clone().multiplyScalar(bulletSpeed * dt));
+            b.position.z -= bulletSpeed * dt;
             b.userData.life -= dt;
-
             if (b.userData.life <= 0 || b.position.z < SPAWN_Z_MIN - 10) {
-                scene.remove(b);
-                bullets.splice(i, 1);
-                continue;
+                scene.remove(b); bullets.splice(i, 1); continue;
             }
 
-            // Hit enemy hordes (check against horde group position + spread)
+            // Hit enemies
             let hit = false;
             for (let j = enemies.length - 1; j >= 0; j--) {
                 const e = enemies[j];
                 const dx = Math.abs(b.position.x - e.position.x);
                 const dz = Math.abs(b.position.z - e.position.z);
-                const hitRadius = 0.8 + e.userData.vikings.length * 0.05;
-                if (dx < hitRadius && dz < hitRadius) {
-                    // Kill individual vikings
+                const hr = 0.8 + e.userData.zombies.length * 0.05;
+                if (dx < hr && dz < hr) {
                     const kills = Math.min(b.userData.damage, e.userData.hp);
                     e.userData.hp -= kills;
                     SFX.hit();
 
-                    // Remove viking sprites from the horde
-                    for (let k = 0; k < kills && e.userData.vikings.length > 0; k++) {
-                        const dead = e.userData.vikings.pop();
-                        spawnParticles(
-                            e.position.x + dead.position.x, 1,
-                            e.position.z + dead.position.z,
-                            0xCC3333, 3
-                        );
+                    for (let k = 0; k < kills && e.userData.zombies.length > 0; k++) {
+                        const dead = e.userData.zombies.pop();
+                        spawnParticles(e.position.x + dead.position.x, 0.5, e.position.z + dead.position.z, 0x779966, 4);
                         e.remove(dead);
                     }
 
                     if (e.userData.hp <= 0) {
-                        // Entire horde wiped out
                         const reward = Math.ceil(e.userData.maxHp * 0.3 * diff.coins);
-                        coins += reward;
-                        score += e.userData.maxHp;
+                        coins += reward; score += e.userData.maxHp;
                         spawnCoinPickup(e.position.x, e.position.z, reward);
+                        spawnExplosion(e.position.x, e.position.z);
                         SFX.enemyDie();
-                        scene.remove(e);
-                        enemies.splice(j, 1);
+                        scene.remove(e); enemies.splice(j, 1);
                     }
 
-                    scene.remove(b);
-                    bullets.splice(i, 1);
-                    hit = true;
-                    break;
+                    scene.remove(b); bullets.splice(i, 1); hit = true; break;
                 }
             }
-
             if (hit) continue;
 
             // Hit barrels
@@ -993,186 +844,110 @@
                 if (dx < 0.8 && dz < 0.8) {
                     br.userData.hp -= b.userData.damage;
                     SFX.hit();
-
-                    // Update HP label
                     if (br.userData.hp > 0) {
                         updateSpriteText(br.userData.hpLabel, br.userData.hp.toString(), '#ffffff');
-                    }
-
-                    if (br.userData.hp <= 0) {
-                        // Barrel destroyed — apply reward
+                    } else {
                         applyBarrelReward(br.userData.type, br.position.x, br.position.z);
-                        spawnParticles(br.position.x, 0.8, br.position.z, 0x8B5E3C, 12);
+                        spawnExplosion(br.position.x, br.position.z);
                         SFX.barrelBreak();
-                        scene.remove(br);
-                        barrels.splice(j, 1);
-                        score += 10;
+                        scene.remove(br); barrels.splice(j, 1); score += 10;
                     }
-
-                    scene.remove(b);
-                    bullets.splice(i, 1);
-                    break;
+                    scene.remove(b); bullets.splice(i, 1); break;
                 }
             }
         }
 
-        // ── Animate squad (follows aimX) ──
+        // Squad animation
         squad.forEach(s => {
             s.position.x = aimX + s.userData.offsetX;
-            // Bounce
-            s.children[0].position.y = 0.9 + Math.abs(Math.sin(time * 2 + s.userData.phase)) * 0.06;
+            s.children.forEach(c => {
+                if (c.position && c.userData && c.userData.phase !== undefined) return;
+            });
         });
 
-        // ── Update particles ──
+        // Muzzle flashes
+        for (let i = muzzleFlashes.length - 1; i >= 0; i--) {
+            const m = muzzleFlashes[i];
+            m.userData.life -= dt;
+            m.scale.setScalar(1 + (0.06 - m.userData.life) * 15);
+            if (m.userData.life <= 0) { scene.remove(m); muzzleFlashes.splice(i, 1); }
+        }
+
+        // Particles
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
             p.position.add(p.userData.vel.clone().multiplyScalar(dt));
-            p.userData.vel.y -= 15 * dt;
+            p.userData.vel.y -= 12 * dt;
             p.userData.life -= dt;
-            p.material.opacity = Math.max(0, p.userData.life);
-            if (p.userData.life <= 0) {
-                scene.remove(p);
-                particles.splice(i, 1);
-            }
+            p.material.opacity = Math.max(0, p.userData.life * 2);
+            if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
         }
 
-        // ── Update coin pickups ──
+        // Coin pickups
         for (let i = coinPickups.length - 1; i >= 0; i--) {
             const c = coinPickups[i];
             c.position.y += c.userData.vy * dt;
             c.userData.vy -= 8 * dt;
             c.rotation.y += dt * 5;
             c.userData.life -= dt;
-            if (c.userData.life <= 0) {
-                scene.remove(c);
-                coinPickups.splice(i, 1);
-                SFX.coin();
-            }
+            if (c.userData.life <= 0) { scene.remove(c); coinPickups.splice(i, 1); SFX.coin(); }
         }
 
-        // ── Camera shake ──
+        // Camera shake
         if (shakeAmount > 0.01) {
-            camera.position.x = (Math.random() - 0.5) * shakeAmount * 2;
-            camera.position.y = 18 + (Math.random() - 0.5) * shakeAmount;
+            camera.position.x = (Math.random()-0.5) * shakeAmount * 2;
+            camera.position.y = 8 + (Math.random()-0.5) * shakeAmount;
             shakeAmount *= 0.88;
         } else {
-            camera.position.x = 0;
-            camera.position.y = 18;
-            shakeAmount = 0;
+            camera.position.x = 0; camera.position.y = 8; shakeAmount = 0;
         }
 
-        // ── Wave progress ──
+        // Wave progress
         const killed = waveEnemiesTotal - waveEnemiesLeft - enemies.length;
-        const progress = waveEnemiesTotal > 0 ? killed / waveEnemiesTotal : 1;
-        waveBarFill.style.width = (progress * 100) + '%';
-
+        waveBarFill.style.width = (waveEnemiesTotal > 0 ? killed / waveEnemiesTotal * 100 : 100) + '%';
         updateHUD();
 
-        // ── Check wave complete ──
+        // Wave complete
         if (waveEnemiesLeft <= 0 && enemies.length === 0) {
-            SFX.waveClear();
-            showUpgradeShop();
+            SFX.waveClear(); showUpgradeShop();
         }
-    }
-
-    function applyWeapon() {
-        const w = WEAPONS[weaponLevel];
-        bulletDamage = w.damage;
-        fireRate = w.fireRate;
-    }
-
-    function applyBarrelReward(type, x, z) {
-        switch (type) {
-            case 'weapon':
-                if (weaponLevel < WEAPONS.length - 1) {
-                    weaponLevel++;
-                    applyWeapon();
-                    rebuildSquad();
-                    showActionText(WEAPONS[weaponLevel].name.toUpperCase() + '!', '#ff4444');
-                } else {
-                    // Already maxed — give coins instead
-                    const amt = Math.ceil((8 + wave * 3) * diff.coins);
-                    coins += amt;
-                    spawnCoinPickup(x, z, amt);
-                    showActionText('+' + amt + ' COINS', '#ffdd44');
-                }
-                break;
-            case 'squad':
-                squadCount++;
-                upgrades.squad++;
-                rebuildSquad();
-                showActionText('+1 ALLY!', '#44ff88');
-                break;
-            case 'coins':
-                const amount = Math.ceil((5 + wave * 2) * diff.coins);
-                coins += amount;
-                spawnCoinPickup(x, z, amount);
-                showActionText('+' + amount + ' COINS', '#ffdd44');
-                break;
-        }
-        shake(0.2);
-        SFX.upgrade();
     }
 
     // ─── Game Flow ──────────────────────────────────────────────────
     function startGame() {
         clearEntities();
-        state = 'playing';
-        wave = 0;
-        score = 0;
-        coins = 0;
-        squadCount = 1;
-        weaponLevel = 0;
-        bulletSpeed = 30;
-        pressure = 1.0;
-        upgrades = { weapon: 0, squad: 0, damage: 0, fireRate: 0, range: 0 };
+        wave = 0; score = 0; coins = 0;
+        squadCount = 1; weaponLevel = 0;
+        bulletSpeed = 35; pressure = 1.0;
+        upgrades = { weapon: 0, squad: 0 };
         applyWeapon();
-
-        startScreen.classList.add('hidden');
-        startScreen.classList.remove('active');
-        gameoverScreen.classList.add('hidden');
-        gameoverScreen.classList.remove('active');
-        waveScreen.classList.add('hidden');
-        waveScreen.classList.remove('active');
-
+        startScreen.classList.add('hidden'); startScreen.classList.remove('active');
+        gameoverScreen.classList.add('hidden'); gameoverScreen.classList.remove('active');
+        waveScreen.classList.add('hidden'); waveScreen.classList.remove('active');
         startWave();
     }
 
     function nextWave() {
         clearEntities();
-        waveScreen.classList.add('hidden');
-        waveScreen.classList.remove('active');
+        waveScreen.classList.add('hidden'); waveScreen.classList.remove('active');
         startWave();
     }
 
     function doGameOver() {
-        state = 'gameover';
-        SFX.gameOver();
-        hudEl.style.display = 'none';
-        waveBar.style.display = 'none';
-        goTitle.textContent = 'OVERRUN';
-        goTitle.className = 'lose';
-        goWave.textContent = wave;
-        goScore.textContent = score;
-        gameoverScreen.classList.remove('hidden');
-        gameoverScreen.classList.add('active');
+        state = 'gameover'; SFX.gameOver();
+        hudEl.style.display = 'none'; waveBar.style.display = 'none';
+        goTitle.textContent = 'OVERRUN'; goTitle.className = 'lose';
+        goWave.textContent = wave; goScore.textContent = score;
+        gameoverScreen.classList.remove('hidden'); gameoverScreen.classList.add('active');
     }
 
     // ─── Input ──────────────────────────────────────────────────────
-    // Swipe/drag to move aim position; auto-aim to nearest target
-    let dragging = false;
-    let lastPointerX = 0;
-
-    function onDown(x) {
-        dragging = true;
-        lastPointerX = x;
-        ensureAudio();
-    }
+    let dragging = false, lastPointerX = 0;
+    function onDown(x) { dragging = true; lastPointerX = x; ensureAudio(); }
     function onMove(x) {
         if (!dragging) return;
-        const dx = x - lastPointerX;
-        lastPointerX = x;
-        aimX = Math.max(-ARENA_WIDTH / 2, Math.min(ARENA_WIDTH / 2, aimX + dx * 0.04));
+        const dx = x - lastPointerX; lastPointerX = x;
+        aimX = Math.max(-ROAD_W/2+1, Math.min(ROAD_W/2-1, aimX + dx * 0.035));
     }
     function onUp() { dragging = false; }
 
@@ -1183,22 +958,17 @@
     document.addEventListener('touchmove', e => { e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
     document.addEventListener('touchend', onUp);
 
-    // Keyboard
     const keys = {};
     document.addEventListener('keydown', e => { keys[e.key] = true; });
     document.addEventListener('keyup', e => { keys[e.key] = false; });
 
     // ─── Render Loop ────────────────────────────────────────────────
     let lastTime = 0;
-
-    function loop(timestamp) {
-        const dt = Math.min((timestamp - (lastTime || timestamp)) / 1000, 0.05);
-        lastTime = timestamp;
-
-        // Keyboard aim
-        if (keys['ArrowLeft'] || keys['a'] || keys['A']) aimX = Math.max(-ARENA_WIDTH / 2, aimX - 8 * dt);
-        if (keys['ArrowRight'] || keys['d'] || keys['D']) aimX = Math.min(ARENA_WIDTH / 2, aimX + 8 * dt);
-
+    function loop(ts) {
+        const dt = Math.min((ts - (lastTime || ts)) / 1000, 0.05);
+        lastTime = ts;
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) aimX = Math.max(-ROAD_W/2+1, aimX - 8*dt);
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) aimX = Math.min(ROAD_W/2-1, aimX + 8*dt);
         update(dt);
         renderer.render(scene, camera);
         requestAnimationFrame(loop);
@@ -1210,6 +980,6 @@
     document.getElementById('btn-next').addEventListener('click', nextWave);
 
     initRenderer();
-    initArena();
+    initEnvironment();
     requestAnimationFrame(loop);
 })();
