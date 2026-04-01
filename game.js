@@ -277,70 +277,221 @@
         updateHUD();
     }
 
-    // ─── Create Entities ────────────────────────────────────────────
-    function createRunner(x, z, isEnemy) {
-        const g = new THREE.Group();
-        const bodyMat = isEnemy ? MAT.enemy : MAT.ally;
-        const skinMat = isEnemy ? MAT.enemySkin : MAT.allySkin;
+    // ─── Character Sprite Art ─────────────────────────────────────
+    // Draw characters on canvas, cache as textures for billboard sprites
 
-        // Torso
-        const torso = new THREE.Mesh(GEO.torso, bodyMat);
-        torso.position.y = 0.6;
-        torso.castShadow = true;
-        g.add(torso);
+    const charCache = { warrior: [], viking: [] };
+
+    function drawWarrior(ctx, variant) {
+        // Post-apocalyptic warrior with gun
+        const colors = ['#3B7DD8', '#4A90D9', '#2E6BC4', '#5A9DE8'];
+        const armorColors = ['#555', '#666', '#777'];
+        const c = colors[variant % colors.length];
+        const ac = armorColors[variant % armorColors.length];
+
+        ctx.save();
+        ctx.translate(64, 10);
+
+        // Legs (spread stance)
+        ctx.fillStyle = '#444';
+        ctx.fillRect(18, 80, 10, 30);  // left leg
+        ctx.fillRect(36, 80, 10, 30);  // right leg
+        // Boots
+        ctx.fillStyle = '#333';
+        ctx.fillRect(16, 105, 14, 8);
+        ctx.fillRect(34, 105, 14, 8);
+
+        // Body / armor vest
+        ctx.fillStyle = c;
+        ctx.fillRect(15, 40, 34, 42);
+        // Armor plate
+        ctx.fillStyle = ac;
+        ctx.fillRect(20, 45, 24, 15);
+        // Belt
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(15, 75, 34, 6);
+
+        // Arms
+        ctx.fillStyle = '#DDBB88'; // skin
+        ctx.fillRect(5, 45, 12, 8);   // left upper arm
+        ctx.fillRect(47, 45, 12, 8);  // right upper arm
+
+        // Gun (right side)
+        ctx.fillStyle = '#333';
+        ctx.fillRect(52, 38, 8, 4);   // gun body
+        ctx.fillRect(56, 30, 4, 12);  // barrel (pointing up-forward)
+        ctx.fillStyle = '#C8A000';
+        ctx.fillRect(52, 42, 8, 3);   // trigger guard (gold)
 
         // Head
-        const head = new THREE.Mesh(GEO.head, skinMat);
-        head.position.y = 1.05;
-        head.castShadow = true;
-        g.add(head);
+        ctx.fillStyle = '#DDBB88';
+        ctx.beginPath();
+        ctx.arc(32, 30, 14, 0, Math.PI * 2);
+        ctx.fill();
 
-        // Left leg
-        const legL = new THREE.Mesh(GEO.limb, bodyMat);
-        legL.position.set(-0.08, 0.2, 0);
-        g.add(legL);
+        // Headgear (bandana/goggles)
+        ctx.fillStyle = '#C0392B';
+        ctx.fillRect(18, 20, 28, 6);
+        // Goggles
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(22, 22, 8, 5);
+        ctx.fillRect(34, 22, 8, 5);
+        ctx.fillStyle = '#87CEEB';
+        ctx.fillRect(24, 23, 5, 3);
+        ctx.fillRect(36, 23, 5, 3);
 
-        // Right leg
-        const legR = new THREE.Mesh(GEO.limb, bodyMat);
-        legR.position.set(0.08, 0.2, 0);
-        g.add(legR);
-
-        // Left arm
-        const armL = new THREE.Mesh(GEO.limb, skinMat);
-        armL.position.set(-0.28, 0.7, 0);
-        armL.rotation.z = 0.3;
-        g.add(armL);
-
-        // Right arm (holds gun for allies)
-        const armR = new THREE.Mesh(GEO.limb, skinMat);
-        armR.position.set(0.28, 0.7, 0);
-        armR.rotation.z = -0.3;
-        g.add(armR);
-
-        // Gun (allies only)
-        if (!isEnemy) {
-            const gunGroup = new THREE.Group();
-            const gunBody = new THREE.Mesh(GEO.gun, MAT.gunMetal);
-            gunBody.position.set(0, 0, -0.15);
-            gunGroup.add(gunBody);
-            const barrel = new THREE.Mesh(GEO.gunBarrel, MAT.gunMetal);
-            barrel.rotation.x = Math.PI / 2;
-            barrel.position.set(0, 0.02, -0.4);
-            gunGroup.add(barrel);
-            gunGroup.position.set(0.35, 0.6, 0);
-            g.add(gunGroup);
+        // Ammo belt
+        if (variant % 2 === 0) {
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(17, 55, 3, 25);
+            for (let i = 0; i < 5; i++) {
+                ctx.fillStyle = '#C8A000';
+                ctx.fillRect(16, 57 + i * 5, 5, 3);
+            }
         }
 
-        g.position.set(x, 0, z);
-        g.userData = {
+        ctx.restore();
+    }
+
+    function drawViking(ctx, variant) {
+        // Viking raider with axe/shield
+        const colors = ['#8B0000', '#A52A2A', '#B22222', '#CD5C5C'];
+        const c = colors[variant % colors.length];
+
+        ctx.save();
+        ctx.translate(64, 10);
+
+        // Legs
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(18, 82, 10, 28);
+        ctx.fillRect(36, 82, 10, 28);
+        // Fur boots
+        ctx.fillStyle = '#8B7355';
+        ctx.fillRect(15, 103, 16, 10);
+        ctx.fillRect(33, 103, 16, 10);
+        ctx.fillStyle = '#A0926B';
+        ctx.fillRect(15, 103, 16, 4); // fur trim
+
+        // Body (tunic)
+        ctx.fillStyle = c;
+        ctx.fillRect(14, 40, 36, 44);
+        // Chest pattern
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(28, 42, 4, 35);  // center stripe
+        ctx.fillRect(20, 50, 24, 3);  // horizontal stripe
+
+        // Belt
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(14, 78, 36, 6);
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(28, 78, 8, 6); // buckle
+
+        // Arms
+        ctx.fillStyle = '#DDBB88';
+        ctx.fillRect(4, 44, 12, 10);  // left
+        ctx.fillRect(48, 44, 12, 10); // right
+
+        // Shield (left side)
+        ctx.fillStyle = '#654321';
+        ctx.beginPath();
+        ctx.arc(4, 62, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.arc(4, 62, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Axe (right side)
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(56, 35, 4, 40);  // handle
+        ctx.fillStyle = '#888';
+        ctx.beginPath();
+        ctx.moveTo(60, 35);
+        ctx.lineTo(72, 30);
+        ctx.lineTo(72, 48);
+        ctx.lineTo(60, 43);
+        ctx.fill();
+
+        // Head
+        ctx.fillStyle = '#DDBB88';
+        ctx.beginPath();
+        ctx.arc(32, 28, 15, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Beard
+        ctx.fillStyle = variant % 2 === 0 ? '#D2691E' : '#FFD700';
+        ctx.beginPath();
+        ctx.moveTo(20, 32);
+        ctx.quadraticCurveTo(32, 52, 44, 32);
+        ctx.fill();
+
+        // Helmet
+        ctx.fillStyle = '#888';
+        ctx.beginPath();
+        ctx.arc(32, 24, 16, Math.PI, 0);
+        ctx.fill();
+        // Horns
+        ctx.fillStyle = '#F5DEB3';
+        ctx.beginPath();
+        ctx.moveTo(16, 22);
+        ctx.quadraticCurveTo(6, 5, 10, 2);
+        ctx.quadraticCurveTo(14, 8, 18, 20);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(48, 22);
+        ctx.quadraticCurveTo(58, 5, 54, 2);
+        ctx.quadraticCurveTo(50, 8, 46, 20);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(24, 24, 6, 5);
+        ctx.fillRect(34, 24, 6, 5);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(27, 25, 3, 3);
+        ctx.fillRect(37, 25, 3, 3);
+
+        ctx.restore();
+    }
+
+    function getCharTexture(isEnemy) {
+        const type = isEnemy ? 'viking' : 'warrior';
+        const cache = charCache[type];
+        const variant = Math.floor(Math.random() * 4);
+
+        // Check cache
+        if (cache[variant]) return cache[variant];
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        if (isEnemy) drawViking(ctx, variant);
+        else drawWarrior(ctx, variant);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.minFilter = THREE.NearestFilter;
+        tex.magFilter = THREE.NearestFilter;
+        cache[variant] = tex;
+        return tex;
+    }
+
+    // ─── Create Entities ────────────────────────────────────────────
+    function createRunner(x, z, isEnemy) {
+        const tex = getCharTexture(isEnemy);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(1.4, 1.4, 1);
+        sprite.position.set(x, 0.7, z);
+        sprite.userData = {
             baseX: x, baseZ: z,
             phase: Math.random() * Math.PI * 2,
             isEnemy, dead: false,
-            legL, legR, armL, armR
         };
 
-        scene.add(g);
-        return g;
+        scene.add(sprite);
+        return sprite;
     }
 
     function updateRunners() {
@@ -1165,20 +1316,12 @@
 
         // Animate runners
         const time = Date.now() * 0.01;
-        const runSpeed = speed * 8;
         runners.forEach(r => {
             const spread = 1 + runners.length * 0.008;
             r.position.x = crowdX + r.userData.baseX * spread;
             r.position.z = r.userData.baseZ * spread * 0.5;
-            r.position.y = Math.abs(Math.sin(time * 2 + r.userData.phase)) * 0.08;
-            // Leg & arm swing animation
-            const swing = Math.sin(time * runSpeed + r.userData.phase);
-            if (r.userData.legL) {
-                r.userData.legL.rotation.x = swing * 0.6;
-                r.userData.legR.rotation.x = -swing * 0.6;
-                r.userData.armL.rotation.x = -swing * 0.4;
-                r.userData.armR.rotation.x = swing * 0.4;
-            }
+            // Bouncy run
+            r.position.y = 0.7 + Math.abs(Math.sin(time * 3 + r.userData.phase)) * 0.12;
         });
 
         // Update floating crowd number
@@ -1206,14 +1349,7 @@
         enemies.forEach(eg => {
             eg.units.forEach(u => {
                 if (u.userData.dead) return;
-                u.position.y = Math.abs(Math.sin(time * 2 + u.userData.phase)) * 0.06;
-                const swing = Math.sin(time * 4 + u.userData.phase);
-                if (u.userData.legL) {
-                    u.userData.legL.rotation.x = swing * 0.5;
-                    u.userData.legR.rotation.x = -swing * 0.5;
-                    u.userData.armL.rotation.x = -swing * 0.3;
-                    u.userData.armR.rotation.x = swing * 0.3;
-                }
+                u.position.y = 0.7 + Math.abs(Math.sin(time * 3 + u.userData.phase)) * 0.1;
             });
         });
 
