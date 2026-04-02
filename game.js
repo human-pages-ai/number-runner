@@ -558,7 +558,7 @@
         // Speed varies by type
         let speed;
         if (type === 'flanker') {
-            speed = diff.enemySpeed * (1.6 + Math.random() * 0.5) * (1 + wave * 0.05);
+            speed = diff.enemySpeed * (2.2 + Math.random() * 0.6) * (1 + wave * 0.05);
         } else if (type === 'brute') {
             speed = diff.enemySpeed * (0.5 + Math.random() * 0.2) * (1 + wave * 0.03);
         } else {
@@ -897,16 +897,17 @@
         const p = pressure;
 
         if (waveNum === 1) {
-            // Wave 1: enemies across full road width + flankers from the start
-            // A non-moving player MUST die — enemies on edges walk right past
-            queue.push({ hp: 1, type: 'normal', delay: 0.5 });
-            queue.push({ hp: 1, type: 'flanker', delay: 1.0 });
-            queue.push({ hp: 1, type: 'normal', delay: 1.5 });
-            queue.push({ hp: 1, type: 'flanker', delay: 2.0 });
-            queue.push({ hp: 1, type: 'normal', delay: 2.5 });
-            queue.push({ hp: 1, type: 'flanker', delay: 3.0 });
-            queue.push({ hp: 1, type: 'normal', delay: 3.5 });
-            queue.push({ hp: 1, type: 'flanker', delay: 4.0 });
+            // Wave 1: immediate flankers from both edges — non-moving player dies in ~5s
+            // Flankers spawn CLOSE (z=-12) and are FAST — they rush the edges
+            // Player MUST move to intercept them or die
+            queue.push({ hp: 1, type: 'flanker', delay: 0.0, spawnZ: -12 }); // instant left/right
+            queue.push({ hp: 1, type: 'flanker', delay: 0.3, spawnZ: -12 }); // second flanker other side
+            queue.push({ hp: 1, type: 'normal', delay: 0.5, spawnZ: -18 });
+            queue.push({ hp: 1, type: 'flanker', delay: 1.5, spawnZ: -14 });
+            queue.push({ hp: 1, type: 'normal', delay: 2.0, spawnZ: -20 });
+            queue.push({ hp: 1, type: 'flanker', delay: 2.5, spawnZ: -12 });
+            queue.push({ hp: 1, type: 'normal', delay: 3.0, spawnZ: -18 });
+            queue.push({ hp: 1, type: 'flanker', delay: 3.5, spawnZ: -14 });
         } else if (waveNum === 2) {
             // More pressure, faster spawns, simultaneous edge attacks
             for (let i = 0; i < 6; i++) {
@@ -1212,7 +1213,7 @@
         while (waveSpawnIndex < waveSpawnQueue.length) {
             const entry = waveSpawnQueue[waveSpawnIndex];
             if (waveElapsed >= entry.delay) {
-                const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
+                const z = entry.spawnZ != null ? entry.spawnZ : (SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN));
                 spawnEnemy(z, entry.hp, entry.type);
                 waveSpawnIndex++;
                 waveEnemiesLeft = waveSpawnQueue.length - waveSpawnIndex;
