@@ -509,9 +509,25 @@
         for (let i = 0; i < squadCount; i++) squad.push(spawnSquadMember(i));
     }
 
-    function spawnEnemy(z, hp) {
-        const spawnW = Math.min(ROAD_W - 2, 3 + wave * 1.0);
-        const cx = (Math.random() - 0.5) * spawnW;
+    // Enemy types: 'normal', 'flanker', 'brute', 'splitter'
+    function spawnEnemy(z, hp, type) {
+        type = type || 'normal';
+
+        // Spawn position depends on type — enemies use FULL road width
+        let cx;
+        if (type === 'flanker') {
+            // Flankers spawn on the far edges — positional threats
+            const side = Math.random() < 0.5 ? -1 : 1;
+            cx = side * (ROAD_W / 2 - 0.5 - Math.random() * 0.8);
+        } else if (type === 'brute') {
+            // Brutes can spawn anywhere but prefer center
+            cx = (Math.random() - 0.5) * (ROAD_W - 2);
+        } else {
+            // Normal/splitter: width expands with wave (wave 1 narrow, wave 5+ full)
+            const spawnW = Math.min(ROAD_W - 1, 2 + wave * 1.5);
+            cx = (Math.random() - 0.5) * spawnW;
+        }
+
         const group = new THREE.Group();
         group.position.set(cx, 0, z);
 
@@ -524,20 +540,41 @@
             const zombie = createZombie();
             zombie.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
             zombie.rotation.y = Math.PI; // face the player
+            // Tint flankers blue-green, brutes dark red
+            if (type === 'flanker') {
+                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: 0x55aa99 }); });
+            } else if (type === 'brute') {
+                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: 0x994444 }); });
+            } else if (type === 'splitter') {
+                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: 0xaa88cc }); });
+            }
             group.add(zombie);
             zombies.push(zombie);
         }
 
-        group.scale.setScalar(1.3); // bigger zombies visible from high camera
-        const speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.04);
-        group.userData = { hp, maxHp: hp, speed, wobble: Math.random() * Math.PI * 2, zombies };
+        // Scale: brutes are bigger
+        group.scale.setScalar(type === 'brute' ? 1.6 : 1.3);
+
+        // Speed varies by type
+        let speed;
+        if (type === 'flanker') {
+            speed = diff.enemySpeed * (1.6 + Math.random() * 0.5) * (1 + wave * 0.05);
+        } else if (type === 'brute') {
+            speed = diff.enemySpeed * (0.5 + Math.random() * 0.2) * (1 + wave * 0.03);
+        } else {
+            speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.04);
+        }
+
+        group.userData = { hp, maxHp: hp, speed, wobble: Math.random() * Math.PI * 2, zombies, type, spawnTime: Date.now() };
         scene.add(group);
         enemies.push(group);
     }
 
+    let lastBarrelSide = 1;
     function spawnBarrel(z) {
-        // Crates positioned on SIDES of the road (like the screenshot)
-        const side = Math.random() < 0.5 ? -1 : 1;
+        // Crates positioned on SIDES of the road — alternate sides to force movement
+        lastBarrelSide *= -1;
+        const side = lastBarrelSide;
         const x = side * (ROAD_W / 2 - 1.5 + Math.random() * 0.5);
 
         const types = ['squad', 'weapon', 'coins', 'squad'];
@@ -566,23 +603,27 @@
         barrels.push(crate);
     }
 
-    // ── Bullet creation — brighter, bigger dots (VFX agent) ──
+    // ── Bullet creation — always fires straight forward (negative Z) ──
     function createBullet(fromX, fromZ) {
         const w = WEAPONS[weaponLevel];
         const g = new THREE.Group();
         g.position.set(fromX + (Math.random()-0.5)*0.15, 0.4, fromZ);
 
-        // Bright white-yellow core — bigger for visibility from high angle
+        // Bright white-yellow core
         const core = new THREE.Mesh(new THREE.SphereGeometry(w.size * 2.2, 6, 6),
             new THREE.MeshBasicMaterial({ color: 0xffffaa }));
         g.add(core);
 
-        // Orange glow — wider and brighter
+        // Orange glow
         const glow = new THREE.Mesh(new THREE.SphereGeometry(w.size * 4.5, 6, 6),
             new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.4 }));
         g.add(glow);
 
-        g.userData = { damage: bulletDamage, life: 2.5, vx: (Math.random() - 0.5) * 2.0 };
+        // Bullets always go straight forward — no aiming, positioning is the skill
+        const vx = (Math.random() - 0.5) * 0.8; // tiny spread only
+        const vz = -bulletSpeed;
+
+        g.userData = { damage: bulletDamage, life: 2.5, vx, vz };
         scene.add(g); bullets.push(g);
     }
 
@@ -845,14 +886,110 @@
         }, 50);
     }
 
-    // ─── Wave System ────────────────────────────────────────────────
+    // ─── Wave System — difficulty curve ────────────────────────────
+    // Wave spawn queue: array of { hp, type, delay } entries
+    let waveSpawnQueue = [];
+    let waveSpawnIndex = 0;
+    let waveElapsed = 0; // time since wave start, for intra-wave speed ramp
+
+    function buildWaveSpawnQueue(waveNum) {
+        const queue = [];
+        const p = pressure;
+
+        if (waveNum === 1) {
+            // Wave 1: enemies across full road width + flankers from the start
+            // A non-moving player MUST die — enemies on edges walk right past
+            queue.push({ hp: 1, type: 'normal', delay: 0.5 });
+            queue.push({ hp: 1, type: 'flanker', delay: 1.0 });
+            queue.push({ hp: 1, type: 'normal', delay: 1.5 });
+            queue.push({ hp: 1, type: 'flanker', delay: 2.0 });
+            queue.push({ hp: 1, type: 'normal', delay: 2.5 });
+            queue.push({ hp: 1, type: 'flanker', delay: 3.0 });
+            queue.push({ hp: 1, type: 'normal', delay: 3.5 });
+            queue.push({ hp: 1, type: 'flanker', delay: 4.0 });
+        } else if (waveNum === 2) {
+            // More pressure, faster spawns, simultaneous edge attacks
+            for (let i = 0; i < 6; i++) {
+                queue.push({ hp: Math.ceil(1.5 * diff.enemyHP * p), type: 'normal', delay: 0.5 + i * 0.8 });
+            }
+            for (let i = 0; i < 6; i++) {
+                queue.push({ hp: 1, type: 'flanker', delay: 0.3 + i * 0.9 });
+            }
+        } else if (waveNum === 3) {
+            // Dense waves: normals everywhere + flanker streams + first brute
+            for (let i = 0; i < 8; i++) {
+                const hp = Math.ceil((1.5 + waveNum * 0.3) * diff.enemyHP * p);
+                queue.push({ hp, type: 'normal', delay: 0.5 + i * 0.8 });
+            }
+            for (let i = 0; i < 5; i++) {
+                queue.push({ hp: 1, type: 'flanker', delay: 1.0 + i * 1.3 });
+            }
+            // First brute in center — forces you to stay center while flankers leak
+            queue.push({ hp: Math.ceil(5 * diff.enemyHP * p), type: 'brute', delay: 3.5 });
+        } else if (waveNum === 4) {
+            // Splitters + constant edge pressure
+            for (let i = 0; i < 10; i++) {
+                const hp = Math.ceil((2 + waveNum * 0.4) * diff.enemyHP * p);
+                queue.push({ hp, type: 'normal', delay: 0.4 + i * 0.7 });
+            }
+            for (let i = 0; i < 5; i++) {
+                queue.push({ hp: 1, type: 'flanker', delay: 0.8 + i * 1.2 });
+            }
+            queue.push({ hp: Math.ceil(3 * diff.enemyHP * p), type: 'splitter', delay: 3.0 });
+            queue.push({ hp: Math.ceil(3 * diff.enemyHP * p), type: 'splitter', delay: 5.0 });
+            queue.push({ hp: Math.ceil(6 * diff.enemyHP * p), type: 'brute', delay: 5.5 });
+        } else {
+            // Wave 5+: escalating difficulty — CROWDED road
+            const baseCount = Math.floor(8 + waveNum * 3 + waveNum * waveNum * 0.4);
+            const enemyCount = Math.floor(baseCount * diff.spawnRate * p);
+
+            const flankerRatio = Math.min(0.35, 0.15 + waveNum * 0.03);
+            const bruteRatio = Math.min(0.15, 0.05 + waveNum * 0.015);
+            const splitterRatio = Math.min(0.12, 0.04 + waveNum * 0.012);
+            const normalRatio = 1 - flankerRatio - bruteRatio - splitterRatio;
+
+            const normals = Math.floor(enemyCount * normalRatio);
+            const flankers = Math.max(3, Math.floor(enemyCount * flankerRatio));
+            const brutes = Math.max(1, Math.floor(enemyCount * bruteRatio));
+            const splitters = Math.max(1, Math.floor(enemyCount * splitterRatio));
+
+            let delay = 0.3;
+            const spawnGap = Math.max(0.2, 1.4 - waveNum * 0.1);
+
+            for (let i = 0; i < normals; i++) {
+                const hp = Math.ceil((1 + waveNum * 0.5 + Math.random() * waveNum * 0.3) * diff.enemyHP * p);
+                queue.push({ hp, type: 'normal', delay });
+                delay += spawnGap * (0.5 + Math.random() * 0.5);
+            }
+            // Flankers throughout the wave — constant edge pressure
+            for (let i = 0; i < flankers; i++) {
+                queue.push({ hp: Math.ceil((1 + waveNum * 0.2) * diff.enemyHP * p), type: 'flanker', delay: 0.5 + i * spawnGap * 1.2 });
+            }
+            for (let i = 0; i < brutes; i++) {
+                const hp = Math.ceil((4 + waveNum * 0.8) * diff.enemyHP * p);
+                queue.push({ hp, type: 'brute', delay: 2.0 + i * spawnGap * 2.0 });
+            }
+            for (let i = 0; i < splitters; i++) {
+                const hp = Math.ceil((2 + waveNum * 0.4) * diff.enemyHP * p);
+                queue.push({ hp, type: 'splitter', delay: 1.5 + i * spawnGap * 1.5 });
+            }
+        }
+
+        // Sort by delay
+        queue.sort((a, b) => a.delay - b.delay);
+        return queue;
+    }
+
     function startWave() {
         wave++;
-        const baseCount = 2 + wave * 2 + wave * wave * 0.4;
-        const enemyCount = Math.floor(baseCount * diff.spawnRate * pressure);
-        const barrelCount = Math.floor((3 + Math.min(wave * 0.8, 6)) * diff.barrelRate);
-        waveEnemiesLeft = enemyCount;
-        waveEnemiesTotal = enemyCount;
+        waveSpawnQueue = buildWaveSpawnQueue(wave);
+        waveSpawnIndex = 0;
+        waveElapsed = 0;
+        waveEnemiesTotal = waveSpawnQueue.length;
+        waveEnemiesLeft = waveSpawnQueue.length;
+
+        // Barrels: wave 1 gets 1, then scale up modestly
+        const barrelCount = wave === 1 ? 1 : Math.floor((2 + Math.min(wave * 0.6, 5)) * diff.barrelRate);
         waveBarrelsLeft = barrelCount;
         spawnTimer = 0; barrelTimer = 0;
 
@@ -1068,14 +1205,20 @@
 
         spawnAmbientFire(dt);
 
-        // Spawn enemies
-        const spawnInt = Math.max(0.4, 2.5 - wave * 0.12) / diff.spawnRate;
-        spawnTimer += dt;
-        if (waveEnemiesLeft > 0 && spawnTimer >= spawnInt) {
-            spawnTimer = 0;
-            const hp = Math.ceil((1 + wave * 0.4 + Math.random() * wave * 0.3) * diff.enemyHP * (0.7 + pressure * 0.3));
-            spawnEnemy(SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN), hp);
-            waveEnemiesLeft--;
+        // Track wave elapsed time for intra-wave speed ramp
+        waveElapsed += dt;
+
+        // Spawn enemies from queue
+        while (waveSpawnIndex < waveSpawnQueue.length) {
+            const entry = waveSpawnQueue[waveSpawnIndex];
+            if (waveElapsed >= entry.delay) {
+                const z = SPAWN_Z_MIN + Math.random() * (SPAWN_Z_MAX - SPAWN_Z_MIN);
+                spawnEnemy(z, entry.hp, entry.type);
+                waveSpawnIndex++;
+                waveEnemiesLeft = waveSpawnQueue.length - waveSpawnIndex;
+            } else {
+                break;
+            }
         }
 
         // Spawn barrels
@@ -1087,12 +1230,20 @@
             waveBarrelsLeft--;
         }
 
-        // Move enemy hordes
+        // Move enemy hordes — with intra-wave speed ramp
+        const waveSpeedRamp = 1.0 + waveElapsed * 0.012; // enemies get ~1.2% faster per second into the wave
         for (let i = enemies.length - 1; i >= 0; i--) {
             const e = enemies[i];
-            e.position.z += e.userData.speed * dt;
-            e.position.x += Math.sin(time * 1.5 + e.userData.wobble) * 0.2 * dt;
-            e.position.x = Math.max(-ROAD_W/2+1, Math.min(ROAD_W/2-1, e.position.x));
+            const effectiveSpeed = e.userData.speed * waveSpeedRamp;
+            e.position.z += effectiveSpeed * dt;
+            // Flankers stay on their edge lane — positional threats you must move to shoot
+            if (e.userData.type === 'flanker') {
+                // Slight wobble but stay on their side
+                e.position.x += Math.sin(time * 2 + e.userData.wobble) * 0.15 * dt;
+            } else {
+                e.position.x += Math.sin(time * 1.5 + e.userData.wobble) * 0.3 * dt;
+            }
+            e.position.x = Math.max(-ROAD_W/2+0.5, Math.min(ROAD_W/2-0.5, e.position.x));
 
             // Animate zombies
             for (const z of e.userData.zombies) {
@@ -1142,10 +1293,10 @@
             SFX.shoot();
         }
 
-        // Move bullets (VFX agent: added sparse bullet trail particles)
+        // Move bullets — straight forward with tiny spread
         for (let i = bullets.length - 1; i >= 0; i--) {
             const b = bullets[i];
-            b.position.z -= bulletSpeed * dt;
+            b.position.z += (b.userData.vz || -bulletSpeed) * dt;
             b.position.x += (b.userData.vx || 0) * dt;
             b.userData.life -= dt;
             // Sparse bullet trail — every ~3 frames per bullet
@@ -1199,15 +1350,28 @@
                         }
 
                         let reward = Math.ceil(e.userData.maxHp * 0.3 * diff.coins);
-                        // Bonus coins at 5x+ combo
                         if (comboCount >= 5) reward *= 2;
                         coins += reward; score += e.userData.maxHp;
                         spawnCoinPickup(e.position.x, e.position.z, reward);
                         spawnExplosion(e.position.x, e.position.z);
                         SFX.enemyDie();
-                        scene.remove(e); enemies.splice(j, 1);
 
-                        // Hit-freeze on kill (30ms = ~2 frames)
+                        // Splitter: spawn 2-3 small fast children on death
+                        if (e.userData.type === 'splitter') {
+                            const childCount = 2 + Math.floor(Math.random() * 2);
+                            for (let c = 0; c < childCount; c++) {
+                                const childHp = Math.max(1, Math.ceil(e.userData.maxHp * 0.3));
+                                const childZ = e.position.z + (Math.random() - 0.5) * 2;
+                                const childX = e.position.x + (Math.random() - 0.5) * 3;
+                                spawnEnemy(childZ, childHp, 'flanker');
+                                // Position the child near the parent
+                                const child = enemies[enemies.length - 1];
+                                child.position.x = Math.max(-ROAD_W/2+0.5, Math.min(ROAD_W/2-0.5, childX));
+                                child.position.z = childZ;
+                            }
+                        }
+
+                        scene.remove(e); enemies.splice(j, 1);
                         freezeTimer = 0.03;
                     }
 
@@ -1237,12 +1401,10 @@
             }
         }
 
-        // Squad animation
+        // Squad animation — soldiers always face forward (negative Z)
         squad.forEach(s => {
             s.position.x = aimX + s.userData.offsetX;
-            s.children.forEach(c => {
-                if (c.position && c.userData && c.userData.phase !== undefined) return;
-            });
+            s.rotation.y = Math.PI; // always face forward
         });
 
         // Muzzle flashes & temp lights
@@ -1321,13 +1483,15 @@
             }
         }
 
-        // Wave progress
-        const killed = waveEnemiesTotal - waveEnemiesLeft - enemies.length;
+        // Wave progress — based on enemies spawned and killed
+        const spawned = waveSpawnIndex;
+        const alive = enemies.length;
+        const killed = spawned - alive;
         waveBarFill.style.width = (waveEnemiesTotal > 0 ? killed / waveEnemiesTotal * 100 : 100) + '%';
         updateHUD();
 
-        // Wave complete
-        if (waveEnemiesLeft <= 0 && enemies.length === 0) {
+        // Wave complete — all spawned and all dead (including splitter children)
+        if (waveSpawnIndex >= waveSpawnQueue.length && enemies.length === 0) {
             SFX.waveClear(); showUpgradeShop();
         }
     }
