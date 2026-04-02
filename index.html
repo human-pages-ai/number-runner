@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Barrel Defense — LastTokens</title>
+    <title>Math Swarm Survivor — LastTokens</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -166,9 +166,9 @@
 </head>
 <body>
     <div id="hud">
-        <div class="hud-box">WAVE <span id="wave-display">1</span></div>
-        <div class="hud-box" style="background:rgba(255,60,60,0.6)"><span id="weapon-display">Pistol</span></div>
-        <div class="hud-box" style="background:rgba(255,107,53,0.6)">SQUAD <span id="squad-display">1</span></div>
+        <div class="hud-box"><span id="wave-display">0m</span></div>
+        <div class="hud-box" style="background:rgba(255,60,60,0.6)"><span id="weapon-display">DMG:1 FR:3.0</span></div>
+        <div class="hud-box" style="background:rgba(255,107,53,0.6)">SQUAD <span id="squad-display">5</span></div>
         <div class="hud-box" style="background:rgba(200,160,0,0.6)"><span id="coin-display">0</span></div>
     </div>
 
@@ -176,27 +176,15 @@
     <div id="action-text"></div>
 
     <div id="start-screen" class="overlay active">
-        <h1>BARREL<br>DEFENSE</h1>
-        <p class="subtitle">Shoot barrels for upgrades. Shoot enemies to survive. How long can you hold?</p>
-        <div class="difficulty">
-            <button class="diff-btn" data-diff="easy">EASY</button>
-            <button class="diff-btn selected" data-diff="normal">NORMAL</button>
-            <button class="diff-btn" data-diff="hard">HARD</button>
-        </div>
-        <button class="btn" id="btn-start">DEFEND</button>
+        <h1>MATH SWARM<br>SURVIVOR</h1>
+        <p class="subtitle">Steer through gates. Shoot zombies and barrels. How far can you run?</p>
+        <button class="btn" id="btn-start">PLAY</button>
         <p class="credit">Powered by <a href="https://github.com/human-pages-ai">LastTokens</a></p>
-    </div>
-
-    <div id="wave-screen" class="overlay hidden">
-        <h1>WAVE <span id="ws-wave">1</span> CLEAR!</h1>
-        <p class="stat">Coins: <span id="ws-coins">0</span></p>
-        <div class="upgrades" id="upgrade-buttons"></div>
-        <button class="btn next" id="btn-next">NEXT WAVE</button>
     </div>
 
     <div id="gameover-screen" class="overlay hidden">
         <h1 id="go-title" class="lose">OVERRUN</h1>
-        <p class="stat">Survived <span id="go-wave">1</span> waves</p>
+        <p class="stat">Distance: <span id="go-wave">0m</span></p>
         <p class="stat highlight">Score: <span id="go-score">0</span></p>
         <button class="btn retry" id="btn-retry">TRY AGAIN</button>
     </div>
@@ -209,6 +197,6 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
     <div id="danger-vignette"></div>
-    <script src="game.js?v=16"></script>
+    <script src="game.js?v=17"></script>
 </body>
 </html>
