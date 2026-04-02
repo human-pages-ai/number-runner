@@ -5,14 +5,15 @@
     'use strict';
 
     // ─── Three.js Setup ─────────────────────────────────────────────
-    let scene, camera, renderer;
+    let scene, camera, renderer, composer;
+    let pLight, pLight2, rimLight, ambientLight;
     const W = () => window.innerWidth;
     const H = () => window.innerHeight;
 
     function initRenderer() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x332922);
-        scene.fog = new THREE.FogExp2(0x332922, 0.012);
+        scene.background = new THREE.Color(0x1a1520);
+        scene.fog = new THREE.FogExp2(0x1a1520, 0.015);
 
         // High-angle camera ~45° looking down (like the reference)
         camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 200);
@@ -25,14 +26,33 @@
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.0;
+        renderer.toneMappingExposure = 1.1;
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
-        // Warm ambient — enough to see but dark enough for fire to pop
-        scene.add(new THREE.AmbientLight(0x665544, 0.5));
+        // Bloom post-processing
+        try {
+            if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass) {
+                composer = new THREE.EffectComposer(renderer);
+                composer.addPass(new THREE.RenderPass(scene, camera));
+                const bloomPass = new THREE.UnrealBloomPass(
+                    new THREE.Vector2(W(), H()), 0.6, 0.4, 0.82
+                );
+                composer.addPass(bloomPass);
+            }
+        } catch (e) {
+            console.warn('Bloom unavailable:', e);
+            composer = null;
+        }
 
-        // Warm directional (sun)
-        const sun = new THREE.DirectionalLight(0xffeedd, 0.7);
+        // Cool ambient — darker for more contrast
+        ambientLight = new THREE.AmbientLight(0x556677, 0.4);
+        scene.add(ambientLight);
+
+        // Hemisphere light — warm ground, cool sky
+        scene.add(new THREE.HemisphereLight(0x334466, 0x443322, 0.3));
+
+        // Warm directional (moon/fire light from above)
+        const sun = new THREE.DirectionalLight(0xffeedd, 0.5);
         sun.position.set(5, 20, 10);
         sun.castShadow = true;
         sun.shadow.camera.left = -20;
@@ -44,19 +64,27 @@
         scene.add(sun);
 
         // Warm fire glow at player area
-        const pLight = new THREE.PointLight(0xff8844, 1.0, 30);
+        pLight = new THREE.PointLight(0xff8844, 1.2, 30);
         pLight.position.set(0, 3, 4);
         scene.add(pLight);
 
         // Fire glow mid-field
-        const pLight2 = new THREE.PointLight(0xff6622, 0.8, 25);
+        pLight2 = new THREE.PointLight(0xff6622, 0.8, 25);
         pLight2.position.set(0, 2, -8);
         scene.add(pLight2);
+
+        // Rim light from behind enemies — dramatic silhouettes
+        rimLight = new THREE.DirectionalLight(0xff4422, 0.35);
+        rimLight.position.set(0, 5, -35);
+        rimLight.target.position.set(0, 0, 0);
+        scene.add(rimLight);
+        scene.add(rimLight.target);
 
         window.addEventListener('resize', () => {
             camera.aspect = W() / H();
             camera.updateProjectionMatrix();
             renderer.setSize(W(), H());
+            if (composer) composer.setSize(W(), H());
         });
     }
 
@@ -198,66 +226,241 @@
     // ─── Road / Environment ─────────────────────────────────────────
     let envMeshes = [];
 
+    // Procedural canvas texture helper
+    function makeCanvasTexture(w, h, drawFn) {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        drawFn(ctx, w, h);
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        return tex;
+    }
+
+    let fireLights = []; // for flickering animation
+
     function initEnvironment() {
         envMeshes.forEach(m => scene.remove(m));
         envMeshes = [];
+        fireLights = [];
 
-        // Road — dark asphalt, warm tint
+        // ── Sky dome — gradient from dark navy to warm horizon ──
+        const skyGeo = new THREE.SphereGeometry(90, 16, 12);
+        const skyMat = new THREE.ShaderMaterial({
+            side: THREE.BackSide,
+            uniforms: {},
+            vertexShader: `varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+            fragmentShader: `varying vec3 vPos;
+                void main(){
+                    float h = normalize(vPos).y;
+                    vec3 top = vec3(0.04, 0.03, 0.08);
+                    vec3 mid = vec3(0.12, 0.06, 0.04);
+                    vec3 bot = vec3(0.25, 0.08, 0.02);
+                    vec3 col = h > 0.0 ? mix(mid, top, h) : mix(mid, bot, -h * 2.0);
+                    gl_FragColor = vec4(col, 1.0);
+                }`
+        });
+        const sky = new THREE.Mesh(skyGeo, skyMat);
+        scene.add(sky); envMeshes.push(sky);
+
+        // ── Road with procedural asphalt texture ──
+        const roadTex = makeCanvasTexture(256, 512, (ctx, w, h) => {
+            ctx.fillStyle = '#3a3230';
+            ctx.fillRect(0, 0, w, h);
+            // Noise grain
+            for (let i = 0; i < 3000; i++) {
+                const v = 40 + Math.random() * 30;
+                ctx.fillStyle = `rgb(${v},${v-5},${v-8})`;
+                ctx.fillRect(Math.random()*w, Math.random()*h, 2, 2);
+            }
+            // Cracks
+            ctx.strokeStyle = '#2a2520';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 8; i++) {
+                ctx.beginPath();
+                let cx = Math.random() * w, cy = Math.random() * h;
+                ctx.moveTo(cx, cy);
+                for (let j = 0; j < 5; j++) {
+                    cx += (Math.random()-0.5) * 40;
+                    cy += Math.random() * 30;
+                    ctx.lineTo(cx, cy);
+                }
+                ctx.stroke();
+            }
+            // Oil stains
+            for (let i = 0; i < 4; i++) {
+                ctx.fillStyle = 'rgba(30,25,20,0.4)';
+                ctx.beginPath();
+                ctx.arc(Math.random()*w, Math.random()*h, 10+Math.random()*20, 0, Math.PI*2);
+                ctx.fill();
+            }
+        });
+        roadTex.repeat.set(1, 8);
+
         const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 100),
-            new THREE.MeshStandardMaterial({ color: 0x4a3d32, roughness: 0.9 }));
+            new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.95, color: 0xcccccc }));
         road.rotation.x = -Math.PI / 2;
         road.position.set(0, -0.01, -25);
         road.receiveShadow = true;
         scene.add(road); envMeshes.push(road);
 
+        // ── Road center dashes ──
+        const dashMat = new THREE.MeshBasicMaterial({ color: 0x888877 });
+        for (let z = 5; z > -55; z -= 3) {
+            const dash = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, 1.2), dashMat);
+            dash.position.set(0, 0.01, z);
+            scene.add(dash); envMeshes.push(dash);
+        }
+
         // Road edge lines
         for (const side of [-1, 1]) {
-            const line = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 100),
-                new THREE.MeshBasicMaterial({ color: 0x999988 }));
+            const line = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 100),
+                new THREE.MeshBasicMaterial({ color: 0xaaaa88 }));
             line.rotation.x = -Math.PI / 2;
             line.position.set(side * (ROAD_W / 2 - 0.3), 0.01, -25);
             scene.add(line); envMeshes.push(line);
         }
 
-        // Side barriers — low concrete walls with flat tops
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x666655, roughness: 0.9 });
+        // ── Side barriers — concrete jersey walls ──
+        const wallTex = makeCanvasTexture(128, 64, (ctx, w, h) => {
+            ctx.fillStyle = '#555550';
+            ctx.fillRect(0, 0, w, h);
+            for (let i = 0; i < 500; i++) {
+                const v = 70 + Math.random() * 30;
+                ctx.fillStyle = `rgb(${v},${v},${v-5})`;
+                ctx.fillRect(Math.random()*w, Math.random()*h, 2, 2);
+            }
+            // Horizontal joints
+            ctx.strokeStyle = '#444440';
+            for (let y = 16; y < h; y += 16) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            }
+        });
+        const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95 });
         for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 100), wallMat);
-            wall.position.set(side * (ROAD_W / 2 + 0.4), 0.3, -25);
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 100), wallMat);
+            wall.position.set(side * (ROAD_W / 2 + 0.4), 0.35, -25);
             wall.castShadow = true;
             scene.add(wall); envMeshes.push(wall);
 
-            // Outer ground (darker)
-            const gnd = new THREE.Mesh(new THREE.PlaneGeometry(20, 100),
-                new THREE.MeshStandardMaterial({ color: 0x554433 }));
+            // Outer ground (dirt)
+            const dirtTex = makeCanvasTexture(128, 128, (ctx, w, h) => {
+                ctx.fillStyle = '#332820';
+                ctx.fillRect(0, 0, w, h);
+                for (let i = 0; i < 1000; i++) {
+                    const v = 30 + Math.random() * 25;
+                    ctx.fillStyle = `rgb(${v+10},${v},${v-5})`;
+                    ctx.fillRect(Math.random()*w, Math.random()*h, 3, 3);
+                }
+            });
+            dirtTex.repeat.set(3, 10);
+            const gnd = new THREE.Mesh(new THREE.PlaneGeometry(25, 100),
+                new THREE.MeshStandardMaterial({ map: dirtTex, roughness: 1.0, color: 0xbbbbbb }));
             gnd.rotation.x = -Math.PI / 2;
-            gnd.position.set(side * 15, -0.05, -25);
+            gnd.position.set(side * 18, -0.05, -25);
             scene.add(gnd); envMeshes.push(gnd);
         }
 
-        // Scattered rubble/debris on road
-        const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x776655 });
-        for (let i = 0; i < 20; i++) {
-            const s = 0.08 + Math.random() * 0.18;
-            const rubble = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.4, s), rubbleMat);
+        // ── Building silhouettes ──
+        const buildingMat = new THREE.MeshStandardMaterial({ color: 0x151518, roughness: 1.0 });
+        const windowMat = new THREE.MeshBasicMaterial({ color: 0xff9944, transparent: true, opacity: 0.6 });
+        for (const side of [-1, 1]) {
+            for (let i = 0; i < 10; i++) {
+                const bw = 2 + Math.random() * 4;
+                const bh = 4 + Math.random() * 10;
+                const bd = 2 + Math.random() * 4;
+                const bx = side * (ROAD_W / 2 + 3 + Math.random() * 12);
+                const bz = 5 - i * 6 - Math.random() * 3;
+                const building = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), buildingMat);
+                building.position.set(bx, bh / 2, bz);
+                building.castShadow = true;
+                scene.add(building); envMeshes.push(building);
+
+                // Lit windows (sparse)
+                if (Math.random() < 0.5) {
+                    const winCount = Math.floor(1 + Math.random() * 3);
+                    for (let w = 0; w < winCount; w++) {
+                        const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.7), windowMat);
+                        win.position.set(
+                            bx + (side > 0 ? -bw/2 - 0.01 : bw/2 + 0.01),
+                            2 + Math.random() * (bh - 3),
+                            bz + (Math.random() - 0.5) * (bd - 1)
+                        );
+                        win.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+                        scene.add(win); envMeshes.push(win);
+                    }
+                }
+
+                // Some buildings have damaged tops (angled box)
+                if (Math.random() < 0.3) {
+                    const dmg = new THREE.Mesh(new THREE.BoxGeometry(bw * 0.6, bh * 0.2, bd * 0.7), buildingMat);
+                    dmg.position.set(bx + (Math.random()-0.5)*1, bh + bh*0.05, bz);
+                    dmg.rotation.z = (Math.random()-0.5) * 0.4;
+                    scene.add(dmg); envMeshes.push(dmg);
+                }
+            }
+        }
+
+        // ── Scattered rubble/debris on road ──
+        const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x665544, roughness: 0.9 });
+        for (let i = 0; i < 25; i++) {
+            const s = 0.08 + Math.random() * 0.2;
+            const rubble = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.4, s * (0.8+Math.random()*0.4)), rubbleMat);
             rubble.position.set(
                 (Math.random() - 0.5) * ROAD_W * 0.8,
                 s * 0.2,
                 -3 - Math.random() * 50
             );
             rubble.rotation.y = Math.random() * Math.PI;
+            rubble.rotation.z = (Math.random()-0.5) * 0.2;
             scene.add(rubble); envMeshes.push(rubble);
         }
 
-        // Small ground fires scattered (static orange point lights)
+        // ── Ground fires with flickering lights ──
         for (let i = 0; i < 8; i++) {
-            const fLight = new THREE.PointLight(0xff6622, 0.4, 5);
-            fLight.position.set(
-                (Math.random() - 0.5) * ROAD_W * 0.6,
-                0.3,
-                -2 - Math.random() * 30
-            );
+            const fx = (Math.random() - 0.5) * ROAD_W * 0.6;
+            const fz = -2 - Math.random() * 30;
+            const fLight = new THREE.PointLight(0xff6622, 0.5, 6);
+            fLight.position.set(fx, 0.4, fz);
+            fLight.userData = { baseIntensity: 0.3 + Math.random() * 0.4, phase: Math.random() * 10 };
             scene.add(fLight); envMeshes.push(fLight);
+            fireLights.push(fLight);
+
+            // Visible fire meshes at fire light positions
+            for (let j = 0; j < 3; j++) {
+                const flame = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.15 + Math.random()*0.1, 0.4 + Math.random()*0.3, 4),
+                    new THREE.MeshBasicMaterial({ color: j === 0 ? 0xff6622 : 0xff9944, transparent: true, opacity: 0.7 })
+                );
+                flame.position.set(fx + (Math.random()-0.5)*0.3, 0.2, fz + (Math.random()-0.5)*0.3);
+                flame.userData = { isFlame: true, baseY: 0.2, phase: Math.random() * 10 };
+                scene.add(flame); envMeshes.push(flame);
+            }
+        }
+
+        // ── Distant smoke columns ──
+        for (let i = 0; i < 3; i++) {
+            const sx = (Math.random()-0.5) * 40;
+            const sz = -30 - Math.random() * 20;
+            const smoke = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.8, 15, 6),
+                new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.15 })
+            );
+            smoke.position.set(sx, 10, sz);
+            scene.add(smoke); envMeshes.push(smoke);
+        }
+
+        // ── Ambient floating dust particles (static decorative) ──
+        const dustMat = new THREE.MeshBasicMaterial({ color: 0xaa9977, transparent: true, opacity: 0.3 });
+        for (let i = 0; i < 40; i++) {
+            const dust = new THREE.Mesh(new THREE.SphereGeometry(0.03, 3, 3), dustMat);
+            dust.position.set(
+                (Math.random()-0.5) * ROAD_W * 1.5,
+                0.5 + Math.random() * 3,
+                (Math.random()-0.5) * 50
+            );
+            dust.userData = { isDust: true, baseX: dust.position.x, baseY: dust.position.y, phase: Math.random() * 20 };
+            scene.add(dust); envMeshes.push(dust);
         }
     }
 
@@ -274,19 +477,39 @@
         legR.position.set(0.15, 0.25, 0); g.add(legR);
 
         // Boots
-        const bootGeo = new THREE.BoxGeometry(0.18, 0.12, 0.25);
+        const bootGeo = new THREE.BoxGeometry(0.18, 0.14, 0.28);
         const bootL = new THREE.Mesh(bootGeo, MAT.soldierBoots);
         bootL.position.set(-0.15, 0.06, 0.02); g.add(bootL);
         const bootR = new THREE.Mesh(bootGeo, MAT.soldierBoots);
         bootR.position.set(0.15, 0.06, 0.02); g.add(bootR);
 
+        // Knee pads
+        const kneeMat = new THREE.MeshStandardMaterial({ color: 0x556633 });
+        const kneeGeo = new THREE.BoxGeometry(0.1, 0.08, 0.08);
+        addPart(g, kneeGeo, kneeMat, -0.15, 0.35, -0.08);
+        addPart(g, kneeGeo, kneeMat, 0.15, 0.35, -0.08);
+
         // Torso
-        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.5, 0.3), MAT.soldierBody);
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.3), MAT.soldierBody);
         torso.position.y = 0.75; g.add(torso);
 
-        // Vest/armor
-        const vest = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.35, 0.33), MAT.soldierVest);
+        // Vest/armor with pockets
+        const vest = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.38, 0.34), MAT.soldierVest);
         vest.position.y = 0.8; g.add(vest);
+
+        // Ammo pouches on vest
+        const pouchMat = new THREE.MeshStandardMaterial({ color: 0x7a6633 });
+        addPart(g, new THREE.BoxGeometry(0.1, 0.08, 0.06), pouchMat, -0.18, 0.68, -0.18);
+        addPart(g, new THREE.BoxGeometry(0.1, 0.08, 0.06), pouchMat, 0.18, 0.68, -0.18);
+
+        // Belt
+        const beltMat = new THREE.MeshStandardMaterial({ color: 0x443322 });
+        addPart(g, new THREE.BoxGeometry(0.54, 0.05, 0.35), beltMat, 0, 0.55, 0);
+
+        // Shoulder pads
+        const shoulderGeo = new THREE.SphereGeometry(0.1, 5, 5);
+        addPart(g, shoulderGeo, MAT.soldierVest, -0.3, 0.92, 0);
+        addPart(g, shoulderGeo, MAT.soldierVest, 0.3, 0.92, 0);
 
         // Arms
         const armGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.45, 6);
@@ -300,13 +523,26 @@
         const handR = new THREE.Mesh(handGeo, MAT.skin);
         handR.position.set(0.32, 0.55, -0.3); g.add(handR);
 
+        // Neck
+        addPart(g, new THREE.CylinderGeometry(0.07, 0.07, 0.1, 6), MAT.skin, 0, 1.03, 0);
+
         // Head
         const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), MAT.skin);
         head.position.y = 1.15; g.add(head);
 
-        // Helmet
+        // Helmet (military style with rim)
         const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), MAT.soldierVest);
-        helmet.position.y = 1.2; helmet.scale.set(1, 0.8, 1); g.add(helmet);
+        helmet.position.y = 1.2; helmet.scale.set(1.05, 0.75, 1.1); g.add(helmet);
+        // Helmet rim
+        addPart(g, new THREE.CylinderGeometry(0.22, 0.22, 0.03, 10), MAT.soldierVest, 0, 1.14, -0.02);
+
+        // Visor (dark strip across face)
+        const visorMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.5 });
+        const visor = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.06, 0.04), visorMat);
+        visor.position.set(0, 1.13, -0.17); g.add(visor);
+
+        // Backpack
+        addPart(g, new THREE.BoxGeometry(0.3, 0.25, 0.15), MAT.soldierVest, 0, 0.82, 0.2);
 
         // Cyan selection circle under feet (like reference)
         const circle = new THREE.Mesh(
@@ -317,7 +553,7 @@
         circle.position.y = 0.02;
         g.add(circle);
 
-        // Inner filled circle for more visibility
+        // Inner filled circle glow
         const circleFill = new THREE.Mesh(
             new THREE.CircleGeometry(0.35, 20),
             new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.15 })
@@ -373,44 +609,93 @@
 
     function createZombie() {
         const g = new THREE.Group();
+        const variant = Math.floor(Math.random() * 3); // 3 visual variants
 
-        // Legs
+        // Legs (slightly asymmetric for shambling look)
         const legGeo = new THREE.CylinderGeometry(0.1, 0.12, 0.5, 5);
         const legL = new THREE.Mesh(legGeo, MAT.zombieDark);
         legL.position.set(-0.12, 0.25, 0); g.add(legL);
         const legR = new THREE.Mesh(legGeo, MAT.zombieDark);
         legR.position.set(0.12, 0.25, 0); g.add(legR);
 
-        // Torso
+        // Feet (bare or wrapped)
+        if (variant !== 2) {
+            const footMat = variant === 0 ? MAT.zombieSkin : MAT.zombieDark;
+            addPart(g, new THREE.BoxGeometry(0.13, 0.06, 0.18), footMat, -0.12, 0.03, 0.02);
+            addPart(g, new THREE.BoxGeometry(0.13, 0.06, 0.18), footMat, 0.12, 0.03, 0.02);
+        }
+
+        // Torso (hunched forward)
         const torso = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.45, 0.25), MAT.zombieClothes);
-        torso.position.y = 0.7; g.add(torso);
+        torso.position.set(0, 0.7, -0.03);
+        torso.rotation.x = 0.15; // hunched
+        g.add(torso);
+
+        // Exposed ribs on one variant
+        if (variant === 1) {
+            const boneMat = new THREE.MeshStandardMaterial({ color: 0xddccaa });
+            for (let i = 0; i < 3; i++) {
+                addPart(g, new THREE.CylinderGeometry(0.015, 0.015, 0.12, 3), boneMat,
+                    -0.2, 0.62 + i * 0.08, -0.05).rotation.z = Math.PI / 2;
+            }
+        }
+
+        // Tattered cloth strips hanging off torso
+        if (variant === 2) {
+            const ragMat = new THREE.MeshStandardMaterial({ color: 0x554433, side: THREE.DoubleSide });
+            for (let i = 0; i < 2; i++) {
+                const rag = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.25), ragMat);
+                rag.position.set((Math.random()-0.5)*0.3, 0.55, -0.14);
+                rag.rotation.z = (Math.random()-0.5) * 0.5;
+                g.add(rag);
+            }
+        }
 
         // Arms (reaching forward — zombie pose)
         const armGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.4, 5);
-        const armL = new THREE.Mesh(armGeo, MAT.zombieSkin);
-        armL.position.set(-0.28, 0.65, -0.15);
-        armL.rotation.x = -1.2; armL.rotation.z = 0.3;
-        g.add(armL);
+        const hasLeftArm = variant !== 1; // variant 1 missing left arm
+        let armL = null;
+        if (hasLeftArm) {
+            armL = new THREE.Mesh(armGeo, MAT.zombieSkin);
+            armL.position.set(-0.28, 0.65, -0.15);
+            armL.rotation.x = -1.2; armL.rotation.z = 0.3;
+            g.add(armL);
+        }
         const armR = new THREE.Mesh(armGeo, MAT.zombieSkin);
         armR.position.set(0.28, 0.7, -0.2);
         armR.rotation.x = -1.0; armR.rotation.z = -0.2;
         g.add(armR);
 
-        // Head
+        // Clawed hands
+        const clawMat = new THREE.MeshStandardMaterial({ color: 0x667755 });
+        if (hasLeftArm) addPart(g, new THREE.SphereGeometry(0.06, 4, 4), clawMat, -0.28, 0.5, -0.35);
+        addPart(g, new THREE.SphereGeometry(0.06, 4, 4), clawMat, 0.28, 0.55, -0.4);
+
+        // Neck (thin, tilted)
+        const neck = addPart(g, new THREE.CylinderGeometry(0.05, 0.06, 0.1, 4), MAT.zombieSkin, 0.02, 0.96, -0.02);
+        neck.rotation.z = 0.15;
+
+        // Head (tilted)
         const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 7, 7), MAT.zombieSkin);
-        head.position.set(0, 1.05, 0);
+        head.position.set(0.03, 1.08, -0.02);
         head.scale.set(1, 1.1, 1);
+        head.rotation.z = 0.1 + Math.random() * 0.15; // head lolling to side
         g.add(head);
 
-        // Eyes (glowing red)
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2200 });
-        const eyeGeo = new THREE.SphereGeometry(0.03, 4, 4);
-        const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-        eyeL.position.set(-0.06, 1.07, -0.14); g.add(eyeL);
-        const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-        eyeR.position.set(0.06, 1.07, -0.14); g.add(eyeR);
+        // Lower jaw (hanging open)
+        const jawMat = new THREE.MeshStandardMaterial({ color: 0x667755 });
+        const jaw = addPart(g, new THREE.BoxGeometry(0.1, 0.05, 0.08), jawMat, 0.02, 0.97, -0.15);
+        jaw.rotation.x = 0.3;
 
-        g.userData = { legL, legR, armL, armR, phase: Math.random() * Math.PI * 2 };
+        // Eyes (glowing — catches bloom)
+        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2200 });
+        const eyeGeo = new THREE.SphereGeometry(0.035, 4, 4);
+        const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+        eyeL.position.set(-0.055, 1.1, -0.14); g.add(eyeL);
+        const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+        eyeR.position.set(0.075, 1.1, -0.14); g.add(eyeR);
+
+        g.userData = { legL, legR, armL, armR, head, torso, phase: Math.random() * Math.PI * 2 };
         return g;
     }
 
@@ -1198,6 +1483,25 @@
 
         const time = Date.now() * 0.001;
 
+        // ── Animate environment: fire flicker, dust, flames ──
+        for (const fl of fireLights) {
+            fl.intensity = fl.userData.baseIntensity + Math.sin(time * 8 + fl.userData.phase) * 0.25
+                + Math.sin(time * 13 + fl.userData.phase * 2) * 0.15;
+        }
+        if (pLight) pLight.intensity = 1.2 + Math.sin(time * 7) * 0.3 + Math.sin(time * 11) * 0.15;
+        if (pLight2) pLight2.intensity = 0.8 + Math.sin(time * 6 + 1) * 0.25;
+
+        for (const m of envMeshes) {
+            if (m.userData.isDust) {
+                m.position.x = m.userData.baseX + Math.sin(time * 0.5 + m.userData.phase) * 0.8;
+                m.position.y = m.userData.baseY + Math.sin(time * 0.3 + m.userData.phase * 1.3) * 0.3;
+            }
+            if (m.userData.isFlame) {
+                m.position.y = m.userData.baseY + Math.abs(Math.sin(time * 6 + m.userData.phase)) * 0.2;
+                m.material.opacity = 0.4 + Math.sin(time * 8 + m.userData.phase) * 0.3;
+            }
+        }
+
         // Combo timer countdown
         if (comboTimer > 0) {
             comboTimer -= dt;
@@ -1254,9 +1558,13 @@
                 if (z.userData.legL) {
                     z.userData.legL.rotation.x = Math.sin(time * 4 + p) * 0.4;
                     z.userData.legR.rotation.x = -Math.sin(time * 4 + p) * 0.4;
-                    z.userData.armL.rotation.x = -1.2 + Math.sin(time * 2 + p) * 0.2;
-                    z.userData.armR.rotation.x = -1.0 + Math.sin(time * 2.5 + p + 1) * 0.2;
                 }
+                if (z.userData.armL) z.userData.armL.rotation.x = -1.2 + Math.sin(time * 2 + p) * 0.25;
+                if (z.userData.armR) z.userData.armR.rotation.x = -1.0 + Math.sin(time * 2.5 + p + 1) * 0.25;
+                // Head lolling
+                if (z.userData.head) z.userData.head.rotation.z = 0.1 + Math.sin(time * 1.5 + p) * 0.12;
+                // Torso sway
+                if (z.userData.torso) z.userData.torso.rotation.z = Math.sin(time * 1.2 + p) * 0.08;
             }
 
             // Reached defense line
@@ -1564,7 +1872,11 @@
         if (keys['ArrowLeft'] || keys['a'] || keys['A']) aimX = Math.max(-ROAD_W/2+1, aimX - 8*dt);
         if (keys['ArrowRight'] || keys['d'] || keys['D']) aimX = Math.min(ROAD_W/2-1, aimX + 8*dt);
         update(dt);
-        renderer.render(scene, camera);
+        if (composer) {
+            composer.render();
+        } else {
+            renderer.render(scene, camera);
+        }
         requestAnimationFrame(loop);
     }
 
