@@ -825,13 +825,14 @@
             const zombie = createZombie();
             zombie.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
             zombie.rotation.y = Math.PI; // face the player
-            // Tint flankers blue-green, brutes dark red
-            if (type === 'flanker') {
-                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: 0x55aa99 }); });
-            } else if (type === 'brute') {
-                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: 0x994444 }); });
-            } else if (type === 'splitter') {
-                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: 0xaa88cc }); });
+            // Tint by type
+            const tints = {
+                flanker: 0x55aa99, brute: 0x994444, splitter: 0xaa88cc,
+                tracker: 0xcc6622, // orange — "hunters"
+            };
+            if (tints[type]) {
+                const tint = tints[type];
+                zombie.traverse(c => { if (c.isMesh && c.material === MAT.zombieSkin) c.material = new THREE.MeshStandardMaterial({ color: tint }); });
             }
             group.add(zombie);
             zombies.push(zombie);
@@ -846,6 +847,8 @@
             speed = diff.enemySpeed * (2.2 + Math.random() * 0.6) * (1 + wave * 0.05);
         } else if (type === 'brute') {
             speed = diff.enemySpeed * (0.5 + Math.random() * 0.2) * (1 + wave * 0.03);
+        } else if (type === 'tracker') {
+            speed = diff.enemySpeed * (1.0 + Math.random() * 0.3) * (1 + wave * 0.04);
         } else {
             speed = diff.enemySpeed * (0.8 + Math.random() * 0.4) * (1 + wave * 0.04);
         }
@@ -867,7 +870,7 @@
         let total = weights.reduce((a, b) => a + b), r = Math.random() * total, type = types[0];
         for (let i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) { type = types[i]; break; } }
 
-        const hp = Math.ceil((2 + wave * 1.0) * diff.enemyHP);
+        const hp = Math.ceil((3 + wave * 1.5) * diff.enemyHP);
         const labels = { squad: 'ALLY+', weapon: weaponLevel < WEAPONS.length - 1 ? WEAPONS[weaponLevel + 1].name : 'MAX', coins: 'COINS' };
 
         const crate = createBarrelObj(type);
@@ -883,7 +886,8 @@
         typeLabel.position.set(0, 3.8, 0);
         crate.add(typeLabel);
 
-        crate.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.35, hpLabel };
+        // Barrels despawn after ~8 seconds — forces commitment
+        crate.userData = { hp, maxHp: hp, type, speed: diff.enemySpeed * 0.35, hpLabel, life: 8 + Math.random() * 2 };
         scene.add(crate);
         barrels.push(crate);
     }
@@ -1194,48 +1198,58 @@
             queue.push({ hp: 1, type: 'normal', delay: 3.0, spawnZ: -18 });
             queue.push({ hp: 1, type: 'flanker', delay: 3.5, spawnZ: -14 });
         } else if (waveNum === 2) {
-            // More pressure, faster spawns, simultaneous edge attacks
-            for (let i = 0; i < 6; i++) {
+            // Introduce trackers — they follow your position, punish zigzag
+            for (let i = 0; i < 5; i++) {
                 queue.push({ hp: Math.ceil(1.5 * diff.enemyHP * p), type: 'normal', delay: 0.5 + i * 0.8 });
             }
-            for (let i = 0; i < 6; i++) {
-                queue.push({ hp: 1, type: 'flanker', delay: 0.3 + i * 0.9 });
+            for (let i = 0; i < 4; i++) {
+                queue.push({ hp: 1, type: 'flanker', delay: 0.3 + i * 1.0 });
             }
+            // Trackers: home toward player — can't just dodge, must prioritize targets
+            queue.push({ hp: Math.ceil(2 * diff.enemyHP * p), type: 'tracker', delay: 2.0 });
+            queue.push({ hp: Math.ceil(2 * diff.enemyHP * p), type: 'tracker', delay: 3.5 });
         } else if (waveNum === 3) {
-            // Dense waves: normals everywhere + flanker streams + first brute
-            for (let i = 0; i < 8; i++) {
+            // Brute + flankers dilemma: brute demands center, flankers demand edges
+            for (let i = 0; i < 6; i++) {
                 const hp = Math.ceil((1.5 + waveNum * 0.3) * diff.enemyHP * p);
                 queue.push({ hp, type: 'normal', delay: 0.5 + i * 0.8 });
             }
             for (let i = 0; i < 5; i++) {
-                queue.push({ hp: 1, type: 'flanker', delay: 1.0 + i * 1.3 });
+                queue.push({ hp: 1, type: 'flanker', delay: 1.0 + i * 1.2 });
             }
-            // First brute in center — forces you to stay center while flankers leak
-            queue.push({ hp: Math.ceil(5 * diff.enemyHP * p), type: 'brute', delay: 3.5 });
+            // Brute in center + trackers: must choose between center threat and edges
+            queue.push({ hp: Math.ceil(5 * diff.enemyHP * p), type: 'brute', delay: 2.0 });
+            queue.push({ hp: Math.ceil(2 * diff.enemyHP * p), type: 'tracker', delay: 3.0 });
+            queue.push({ hp: Math.ceil(2 * diff.enemyHP * p), type: 'tracker', delay: 4.5 });
         } else if (waveNum === 4) {
-            // Splitters + constant edge pressure
-            for (let i = 0; i < 10; i++) {
+            // Splitters + trackers + flankers — all-direction chaos
+            for (let i = 0; i < 8; i++) {
                 const hp = Math.ceil((2 + waveNum * 0.4) * diff.enemyHP * p);
-                queue.push({ hp, type: 'normal', delay: 0.4 + i * 0.7 });
+                queue.push({ hp, type: 'normal', delay: 0.4 + i * 0.6 });
             }
-            for (let i = 0; i < 5; i++) {
-                queue.push({ hp: 1, type: 'flanker', delay: 0.8 + i * 1.2 });
+            for (let i = 0; i < 4; i++) {
+                queue.push({ hp: 1, type: 'flanker', delay: 0.5 + i * 1.0 });
             }
-            queue.push({ hp: Math.ceil(3 * diff.enemyHP * p), type: 'splitter', delay: 3.0 });
-            queue.push({ hp: Math.ceil(3 * diff.enemyHP * p), type: 'splitter', delay: 5.0 });
-            queue.push({ hp: Math.ceil(6 * diff.enemyHP * p), type: 'brute', delay: 5.5 });
+            for (let i = 0; i < 3; i++) {
+                queue.push({ hp: Math.ceil(2 * diff.enemyHP * p), type: 'tracker', delay: 1.0 + i * 1.5 });
+            }
+            queue.push({ hp: Math.ceil(3 * diff.enemyHP * p), type: 'splitter', delay: 2.5 });
+            queue.push({ hp: Math.ceil(3 * diff.enemyHP * p), type: 'splitter', delay: 4.0 });
+            queue.push({ hp: Math.ceil(6 * diff.enemyHP * p), type: 'brute', delay: 5.0 });
         } else {
-            // Wave 5+: escalating difficulty — CROWDED road
+            // Wave 5+: escalating difficulty — all enemy types including trackers
             const baseCount = Math.floor(8 + waveNum * 3 + waveNum * waveNum * 0.4);
             const enemyCount = Math.floor(baseCount * diff.spawnRate * p);
 
-            const flankerRatio = Math.min(0.35, 0.15 + waveNum * 0.03);
-            const bruteRatio = Math.min(0.15, 0.05 + waveNum * 0.015);
-            const splitterRatio = Math.min(0.12, 0.04 + waveNum * 0.012);
-            const normalRatio = 1 - flankerRatio - bruteRatio - splitterRatio;
+            const flankerRatio = Math.min(0.30, 0.12 + waveNum * 0.025);
+            const trackerRatio = Math.min(0.20, 0.08 + waveNum * 0.02);
+            const bruteRatio = Math.min(0.12, 0.04 + waveNum * 0.012);
+            const splitterRatio = Math.min(0.10, 0.03 + waveNum * 0.01);
+            const normalRatio = 1 - flankerRatio - trackerRatio - bruteRatio - splitterRatio;
 
             const normals = Math.floor(enemyCount * normalRatio);
             const flankers = Math.max(3, Math.floor(enemyCount * flankerRatio));
+            const trackers = Math.max(2, Math.floor(enemyCount * trackerRatio));
             const brutes = Math.max(1, Math.floor(enemyCount * bruteRatio));
             const splitters = Math.max(1, Math.floor(enemyCount * splitterRatio));
 
@@ -1247,9 +1261,11 @@
                 queue.push({ hp, type: 'normal', delay });
                 delay += spawnGap * (0.5 + Math.random() * 0.5);
             }
-            // Flankers throughout the wave — constant edge pressure
             for (let i = 0; i < flankers; i++) {
-                queue.push({ hp: Math.ceil((1 + waveNum * 0.2) * diff.enemyHP * p), type: 'flanker', delay: 0.5 + i * spawnGap * 1.2 });
+                queue.push({ hp: Math.ceil((1 + waveNum * 0.2) * diff.enemyHP * p), type: 'flanker', delay: 0.5 + i * spawnGap * 1.1 });
+            }
+            for (let i = 0; i < trackers; i++) {
+                queue.push({ hp: Math.ceil((2 + waveNum * 0.3) * diff.enemyHP * p), type: 'tracker', delay: 1.0 + i * spawnGap * 1.3 });
             }
             for (let i = 0; i < brutes; i++) {
                 const hp = Math.ceil((4 + waveNum * 0.8) * diff.enemyHP * p);
@@ -1541,10 +1557,14 @@
             const e = enemies[i];
             const effectiveSpeed = e.userData.speed * waveSpeedRamp;
             e.position.z += effectiveSpeed * dt;
-            // Flankers stay on their edge lane — positional threats you must move to shoot
+
             if (e.userData.type === 'flanker') {
-                // Slight wobble but stay on their side
+                // Flankers stay on their edge lane
                 e.position.x += Math.sin(time * 2 + e.userData.wobble) * 0.15 * dt;
+            } else if (e.userData.type === 'tracker') {
+                // Trackers home toward player position — punish mindless zigzag
+                const dx = aimX - e.position.x;
+                e.position.x += Math.sign(dx) * Math.min(Math.abs(dx), 2.0 * dt);
             } else {
                 e.position.x += Math.sin(time * 1.5 + e.userData.wobble) * 0.3 * dt;
             }
@@ -1584,11 +1604,19 @@
             }
         }
 
-        // Move barrels/crates
+        // Move barrels/crates — despawn timer creates urgency
         for (let i = barrels.length - 1; i >= 0; i--) {
             const b = barrels[i];
             b.position.z += b.userData.speed * dt;
-            if (b.position.z >= DEFENSE_Z + 5) { scene.remove(b); barrels.splice(i, 1); }
+            b.userData.life -= dt;
+            // Flash when about to despawn (last 2 seconds)
+            if (b.userData.life < 2) {
+                const flash = Math.sin(b.userData.life * 8) > 0;
+                b.visible = flash;
+            }
+            if (b.position.z >= DEFENSE_Z + 5 || b.userData.life <= 0) {
+                scene.remove(b); barrels.splice(i, 1);
+            }
         }
 
         // Auto-fire (always shooting)
