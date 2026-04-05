@@ -11,18 +11,18 @@
 
     function initRenderer() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0d1117);
-        scene.fog = new THREE.FogExp2(0x0d1117, 0.010);
+        scene.background = new THREE.Color(0x1a1a2e);
+        scene.fog = new THREE.FogExp2(0x1a1a2e, 0.012);
 
-        camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 300);
-        camera.position.set(0, 14, 12);
-        camera.lookAt(0, 0, -3);
+        camera = new THREE.PerspectiveCamera(55, W() / H(), 0.1, 300);
+        camera.position.set(0, 16, 12);
+        camera.lookAt(0, 0, -8);
 
         renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(W(), H());
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.2;
+        renderer.toneMappingExposure = 0.9;
         document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
         try {
@@ -30,7 +30,7 @@
                 composer = new THREE.EffectComposer(renderer);
                 composer.addPass(new THREE.RenderPass(scene, camera));
                 const bloomPass = new THREE.UnrealBloomPass(
-                    new THREE.Vector2(W(), H()), 0.8, 0.4, 0.8
+                    new THREE.Vector2(W(), H()), 0.35, 0.4, 0.9
                 );
                 composer.addPass(bloomPass);
             }
@@ -127,15 +127,26 @@
         combo: () => { playTone(660, 0.06, 'sine', 0.08); playTone(880, 0.06, 'sine', 0.06); },
     };
 
+    // ─── Seeded PRNG (deterministic levels) ────────────────────────
+    // Mulberry32 — fast 32-bit PRNG, seeded per level so the same level
+    // always generates the same layout.
+    let _seed = 0;
+    function seedRandom(s) { _seed = s | 0; }
+    function rng() {
+        _seed += 0x6D2B79F5;
+        let t = Math.imul(_seed ^ (_seed >>> 15), 1 | _seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+
     // ─── Constants ──────────────────────────────────────────────────
     const ROAD_W = 10;
-    const FORWARD_SPEED = 8;
-    const SEGMENT_LEN = 20;
-    const GATE_OFFSET = 3;
-    const ZOMBIE_OFFSET = 8;
-    const BARREL_OFFSET = 18;
-    const CLEANUP_BEHIND = 20;
-    const VIEW_AHEAD = 60;
+    const FORWARD_SPEED = 0;       // player is STATIONARY
+    let WORLD_SPEED = 6;           // world scrolls toward player (set per level)
+    const SEGMENT_LEN = 12;
+    const SPAWN_DIST = 40;         // how far ahead things spawn
+    const CLEANUP_BEHIND = 8;      // cleanup objects that passed player
+    const VIEW_AHEAD = 50;
     const MAX_PARTICLES = 80;
     const MAX_ZOMBIES = 200;
     const MAX_SOLDIERS = 60;
@@ -143,144 +154,91 @@
     const BULLET_SPEED = 40;
     const STEER_SPEED = 8;
 
-    // ─── Procedural Sprite Textures ─────────────────────────────────
+    // ─── Level Definitions ──────────────────────────────────────────
+    // Each level defines: sections to complete, base difficulty offset,
+    // scaling multiplier, world speed, and thematic name.
+    const LEVELS = [
+        // --- Act 1: Tutorial & Basics (Levels 1-5) ---
+        { name: 'First Steps',       sections: 3,  diffOffset: 0,  diffScale: 0.4,  speed: 4,    startSquad: 15, startFR: 6, startDMG: 1,
+          desc: 'Learn to dodge and shoot' },
+        { name: 'Gate Runner',        sections: 3,  diffOffset: 0,  diffScale: 0.5,  speed: 4.5,  startSquad: 12, startFR: 6, startDMG: 1,
+          desc: 'Choose your upgrades wisely' },
+        { name: 'Fast Lane',          sections: 4,  diffOffset: 0,  diffScale: 0.6,  speed: 5,    startSquad: 12, startFR: 7, startDMG: 1,
+          desc: 'Cyan runners incoming!' },
+        { name: 'Barrel Alley',       sections: 4,  diffOffset: 1,  diffScale: 0.65, speed: 5,    startSquad: 14, startFR: 7, startDMG: 1,
+          desc: 'Barrels block the path' },
+        { name: 'The Gauntlet',       sections: 5,  diffOffset: 1,  diffScale: 0.7,  speed: 5.5,  startSquad: 12, startFR: 7, startDMG: 2,
+          desc: 'Survive the first real test' },
+        // --- Act 2: Rising Threat (Levels 6-10) ---
+        { name: 'Brute Force',        sections: 5,  diffOffset: 2,  diffScale: 0.75, speed: 5.5,  startSquad: 15, startFR: 8, startDMG: 2,
+          desc: 'Red brutes absorb damage' },
+        { name: 'Tracker Swarm',      sections: 5,  diffOffset: 2,  diffScale: 0.8,  speed: 6,    startSquad: 14, startFR: 8, startDMG: 2,
+          desc: 'They home in on you' },
+        { name: 'Bad Gates',          sections: 6,  diffOffset: 3,  diffScale: 0.85, speed: 6,    startSquad: 12, startFR: 8, startDMG: 2,
+          desc: 'Most gates are traps' },
+        { name: 'Speed Demon',        sections: 6,  diffOffset: 3,  diffScale: 0.9,  speed: 7,    startSquad: 15, startFR: 9, startDMG: 2,
+          desc: 'Everything moves faster' },
+        { name: 'The Horde',          sections: 6,  diffOffset: 4,  diffScale: 0.95, speed: 6.5,  startSquad: 18, startFR: 9, startDMG: 3,
+          desc: 'Massive zombie waves' },
+        // --- Act 3: Endgame (Levels 11-14) ---
+        { name: 'Mixed Nightmare',    sections: 7,  diffOffset: 4,  diffScale: 1.0,  speed: 7,    startSquad: 16, startFR: 10, startDMG: 3,
+          desc: 'All enemy types at once' },
+        { name: 'Bullet Hell',        sections: 7,  diffOffset: 5,  diffScale: 1.05, speed: 7.5,  startSquad: 18, startFR: 10, startDMG: 3,
+          desc: 'Overwhelm with firepower' },
+        { name: 'No Margin',          sections: 7,  diffOffset: 5,  diffScale: 1.05, speed: 7,    startSquad: 12, startFR: 11, startDMG: 4,
+          desc: 'Tiny squad, big problems' },
+        { name: 'Apocalypse',         sections: 8,  diffOffset: 6,  diffScale: 1.15, speed: 8,    startSquad: 20, startFR: 11, startDMG: 4,
+          desc: 'The final wave' },
+        { name: 'Endless',            sections: 999, diffOffset: 0, diffScale: 1.0,  speed: 5,    startSquad: 10, startFR: 6, startDMG: 1,
+          desc: 'How far can you go?' },
+    ];
+
+    let currentLevel = 0;
+    let levelSectionsCompleted = 0;
+    let levelComplete = false;
+    let unlockedLevel = 0; // persisted to localStorage
+
+    function loadProgress() {
+        try {
+            const saved = localStorage.getItem('mss_unlocked');
+            if (saved !== null) unlockedLevel = Math.min(parseInt(saved, 10) || 0, LEVELS.length - 1);
+        } catch(e) {}
+    }
+    function saveProgress() {
+        try { localStorage.setItem('mss_unlocked', unlockedLevel); } catch(e) {}
+    }
+
+    // ─── Sprite Textures (PNG assets + canvas fallbacks) ──────────
     const SPRITE_TEXTURES = {};
 
     function initSpriteTextures() {
-        // Soldier sprite — bright blue with gold helmet
-        const solC = document.createElement('canvas');
-        solC.width = 128; solC.height = 128;
-        const s = solC.getContext('2d');
-        // Shadow
-        s.beginPath(); s.arc(64, 72, 36, 0, Math.PI * 2);
-        s.fillStyle = 'rgba(0,0,0,0.3)'; s.fill();
-        // Selection ring
-        s.beginPath(); s.arc(64, 70, 42, 0, Math.PI * 2);
-        s.strokeStyle = 'rgba(33,150,243,0.8)'; s.lineWidth = 5; s.stroke();
-        s.beginPath(); s.arc(64, 70, 38, 0, Math.PI * 2);
-        s.fillStyle = 'rgba(33,150,243,0.15)'; s.fill();
-        // Body
-        s.fillStyle = '#1565C0'; s.fillRect(52, 76, 24, 16);
-        s.beginPath(); s.ellipse(64, 66, 22, 26, 0, 0, Math.PI * 2);
-        s.fillStyle = '#1976D2'; s.fill();
-        s.strokeStyle = '#0D47A1'; s.lineWidth = 2; s.stroke();
-        // Torso
-        s.beginPath(); s.ellipse(64, 64, 18, 20, 0, 0, Math.PI * 2);
-        s.fillStyle = '#2196F3'; s.fill();
-        // Arms
-        s.fillStyle = '#1565C0';
-        s.beginPath(); s.ellipse(40, 62, 10, 8, -0.2, 0, Math.PI * 2); s.fill();
-        s.beginPath(); s.ellipse(88, 62, 10, 8, 0.2, 0, Math.PI * 2); s.fill();
-        s.fillStyle = '#0D47A1';
-        s.beginPath(); s.ellipse(36, 58, 8, 14, -0.3, 0, Math.PI * 2); s.fill();
-        s.beginPath(); s.ellipse(92, 58, 8, 14, 0.3, 0, Math.PI * 2); s.fill();
-        // Hands
-        s.fillStyle = '#ddb888';
-        s.beginPath(); s.arc(34, 46, 5, 0, Math.PI * 2); s.fill();
-        s.beginPath(); s.arc(94, 46, 5, 0, Math.PI * 2); s.fill();
-        // Face
-        s.fillStyle = '#ddb888';
-        s.beginPath(); s.ellipse(64, 44, 6, 5, 0, 0, Math.PI * 2); s.fill();
-        s.beginPath(); s.arc(64, 36, 14, 0, Math.PI * 2);
-        s.fillStyle = '#ddb888'; s.fill();
-        // Gold helmet
-        s.beginPath(); s.arc(64, 34, 16, 0, Math.PI * 2);
-        s.fillStyle = '#FFD700'; s.fill();
-        s.beginPath(); s.arc(64, 34, 18, 0, Math.PI * 2);
-        s.strokeStyle = '#FFA000'; s.lineWidth = 2; s.stroke();
-        s.fillStyle = '#FFEB3B'; s.fillRect(60, 30, 8, 8);
-        // Gun
-        s.fillStyle = '#333'; s.fillRect(60, 6, 8, 30);
-        s.fillStyle = '#555'; s.fillRect(58, 6, 12, 4);
-        s.fillStyle = '#444'; s.fillRect(54, 32, 20, 12);
-        // Muzzle flash hint
-        s.fillStyle = 'rgba(255,255,200,0.4)';
-        s.beginPath(); s.arc(64, 4, 6, 0, Math.PI * 2); s.fill();
-        SPRITE_TEXTURES.soldier = new THREE.CanvasTexture(solC);
+        const loader = new THREE.TextureLoader();
+        const SZ = 256;
+        function rrect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
 
-        // Zombie textures — bright saturated colors
-        function makeZombieTexture(bodyColor, armColor, eyeColor, isLarge) {
-            const c = document.createElement('canvas');
-            c.width = 128; c.height = 128;
-            const cx = 64, cy = 64;
+        // Load PNG sprites — TextureLoader returns texture immediately,
+        // Three.js updates the material when the image finishes loading
+        SPRITE_TEXTURES.soldier = loader.load('assets/soldier.png');
+        SPRITE_TEXTURES.zombie_normal = loader.load('assets/zombie.png');
+        SPRITE_TEXTURES.zombie_fast = loader.load('assets/zombie_fast.png');
+        SPRITE_TEXTURES.zombie_brute = loader.load('assets/zombie_brute.png');
+
+        // Barrel — canvas-drawn (no PNG asset)
+        function makeBarrelTexture(glowHex) {
+            const c = document.createElement('canvas'); c.width = SZ; c.height = SZ;
             const ctx = c.getContext('2d');
-            const sc = isLarge ? 1.2 : 1.0;
-            // Shadow
-            ctx.beginPath(); ctx.arc(cx, cy + 4, 30 * sc, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
-            // Body
-            ctx.beginPath(); ctx.ellipse(cx, cy + 4, 22 * sc, 26 * sc, 0, 0, Math.PI * 2);
-            ctx.fillStyle = bodyColor; ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 2; ctx.stroke();
-            // Torso detail
-            ctx.fillStyle = armColor;
-            ctx.beginPath(); ctx.ellipse(cx - 8, cy + 8, 8 * sc, 10 * sc, 0.2, 0, Math.PI * 2); ctx.fill();
-            // Arms
-            ctx.fillStyle = armColor;
-            ctx.beginPath(); ctx.ellipse(cx - 24 * sc, cy - 14 * sc, 8 * sc, 16 * sc, -0.4, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.ellipse(cx + 24 * sc, cy - 14 * sc, 8 * sc, 16 * sc, 0.4, 0, Math.PI * 2); ctx.fill();
-            // Claws
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            for (let i = -1; i <= 1; i++) {
-                ctx.fillRect(cx - 28 * sc + i * 5, cy - 32 * sc, 3, 8 * sc);
-                ctx.fillRect(cx + 22 * sc + i * 5, cy - 32 * sc, 3, 8 * sc);
-            }
-            // Head
-            ctx.beginPath(); ctx.arc(cx, cy - 18 * sc, 12 * sc, 0, Math.PI * 2);
-            ctx.fillStyle = armColor; ctx.fill();
-            // Mouth
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-            ctx.beginPath(); ctx.ellipse(cx, cy - 14 * sc, 5 * sc, 3 * sc, 0, 0, Math.PI * 2); ctx.fill();
-            // Glowing eyes
-            ctx.fillStyle = eyeColor;
-            ctx.shadowColor = eyeColor; ctx.shadowBlur = 8;
-            ctx.beginPath(); ctx.arc(cx - 5 * sc, cy - 22 * sc, 4 * sc, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.arc(cx + 5 * sc, cy - 22 * sc, 4 * sc, 0, Math.PI * 2); ctx.fill();
-            ctx.shadowBlur = 0;
-            // Blood spots
-            ctx.fillStyle = 'rgba(180,30,20,0.5)';
-            ctx.beginPath(); ctx.arc(cx + 10, cy + 10, 4, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.arc(cx - 14, cy + 2, 3, 0, Math.PI * 2); ctx.fill();
+            const bx=50,by=40,bw=SZ-100,bh=SZ-80,bcx=SZ/2,bcy=SZ/2;
+            ctx.save();ctx.globalAlpha=0.3;const gg=ctx.createRadialGradient(bcx,bcy,20,bcx,bcy,90);gg.addColorStop(0,glowHex);gg.addColorStop(1,'transparent');ctx.fillStyle=gg;ctx.fillRect(0,0,SZ,SZ);ctx.restore();
+            const wg=ctx.createLinearGradient(bx,by,bx+bw,by);wg.addColorStop(0,'#5D4037');wg.addColorStop(0.3,'#795548');wg.addColorStop(0.5,'#8D6E63');wg.addColorStop(0.7,'#795548');wg.addColorStop(1,'#5D4037');
+            rrect(ctx,bx,by,bw,bh,12);ctx.fillStyle=wg;ctx.fill();ctx.strokeStyle='#3E2723';ctx.lineWidth=3;ctx.stroke();
+            ctx.strokeStyle='rgba(62,39,35,0.4)';ctx.lineWidth=1;for(let px=bx+26;px<bx+bw;px+=26){ctx.beginPath();ctx.moveTo(px,by+6);ctx.lineTo(px,by+bh-6);ctx.stroke();}
+            for(const bandY of [by+20,bcy-4,by+bh-24]){ctx.fillStyle='#78909C';ctx.strokeStyle='#455A64';ctx.lineWidth=2;rrect(ctx,bx-4,bandY,bw+8,10,3);ctx.fill();ctx.stroke();ctx.fillStyle='#90A4AE';ctx.beginPath();ctx.arc(bx+4,bandY+5,3,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(bx+bw-4,bandY+5,3,0,Math.PI*2);ctx.fill();}
+            const lg=ctx.createLinearGradient(bcx-24,bcy-24,bcx+24,bcy+24);lg.addColorStop(0,glowHex);lg.addColorStop(1,'#E65100');
+            rrect(ctx,bcx-28,bcy-28,56,56,6);ctx.fillStyle=lg;ctx.fill();ctx.strokeStyle='#BF360C';ctx.lineWidth=2;ctx.stroke();
+            ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bcx,bcy-6,12,0,Math.PI*2);ctx.fill();ctx.fillRect(bcx-8,bcy+4,16,8);
+            ctx.fillStyle=glowHex;ctx.beginPath();ctx.arc(bcx-5,bcy-8,3,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(bcx+5,bcy-8,3,0,Math.PI*2);ctx.fill();ctx.fillRect(bcx-1,bcy-2,2,4);
             return new THREE.CanvasTexture(c);
         }
-
-        SPRITE_TEXTURES.zombie_normal = makeZombieTexture('#76FF03', '#558B2F', '#FFEB3B', false);
-        SPRITE_TEXTURES.zombie_fast = makeZombieTexture('#00E5FF', '#00838F', '#FF9100', false);
-        SPRITE_TEXTURES.zombie_brute = makeZombieTexture('#FF1744', '#B71C1C', '#FFEA00', true);
-
-        // Barrel/crate — bright orange
-        function makeBarrelTexture(glowColor) {
-            const c = document.createElement('canvas');
-            c.width = 128; c.height = 128;
-            const ctx = c.getContext('2d');
-            const grad = ctx.createRadialGradient(64, 64, 20, 64, 64, 56);
-            grad.addColorStop(0, glowColor + '66');
-            grad.addColorStop(1, glowColor + '00');
-            ctx.fillStyle = grad; ctx.fillRect(0, 0, 128, 128);
-            ctx.fillStyle = '#4a3a2a'; ctx.fillRect(16, 16, 96, 96);
-            ctx.fillStyle = '#5a4a3a'; ctx.fillRect(24, 24, 80, 80);
-            ctx.fillStyle = '#4a3a2a'; ctx.fillRect(28, 28, 72, 72);
-            ctx.strokeStyle = glowColor; ctx.lineWidth = 5;
-            ctx.strokeRect(16, 16, 96, 96);
-            ctx.strokeStyle = glowColor + '88'; ctx.lineWidth = 2;
-            ctx.strokeRect(24, 24, 80, 80);
-            ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(64, 20); ctx.lineTo(64, 108);
-            ctx.moveTo(20, 64); ctx.lineTo(108, 64);
-            ctx.stroke();
-            // Corner bolts
-            ctx.fillStyle = glowColor;
-            for (const [bx, by] of [[20, 20], [104, 20], [20, 104], [104, 104]]) {
-                ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI * 2); ctx.fill();
-            }
-            // Hazard symbol
-            ctx.fillStyle = glowColor + 'aa';
-            ctx.font = 'bold 28px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText('⚠', 64, 64);
-            return new THREE.CanvasTexture(c);
-        }
-
         SPRITE_TEXTURES.barrel = makeBarrelTexture('#FF6D00');
     }
 
@@ -325,11 +283,11 @@
 
         // Road texture
         const roadTex = makeCanvasTexture(128, 256, (ctx, w, h) => {
-            ctx.fillStyle = '#2a2428';
+            ctx.fillStyle = '#6b6b7a';
             ctx.fillRect(0, 0, w, h);
             for (let i = 0; i < 1000; i++) {
-                const v = 30 + Math.random() * 20;
-                ctx.fillStyle = `rgb(${v},${v - 3},${v - 5})`;
+                const v = 95 + Math.random() * 30;
+                ctx.fillStyle = `rgb(${v},${v - 2},${v - 3})`;
                 ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
             }
         });
@@ -482,8 +440,9 @@
     let fireRateStat = 2.5, damageStat = 1;
     let sectionCount = 0;
     let nextSegmentZ = 0;
+    let worldScroll = 0;           // virtual distance for generation
     let shakeAmount = 0;
-    let baseFov = 50, fovTarget = 50;
+    let baseFov = 55, fovTarget = 55;
 
     // Combo tracking
     let comboCount = 0, comboTimer = 0;
@@ -515,7 +474,10 @@
     let fireCooldown = 0;
 
     // Segment tracking
-    const SEGMENT_TYPES = ['gates', 'zombies', 'barrels'];
+    // Every segment spawns zombies. Gates appear every 3rd segment, barrels every 3rd (offset).
+    const GATE_OFFSET = 3;
+    const ZOMBIE_OFFSET = 0;
+    const BARREL_OFFSET = 6;
     let segmentIndex = 0;
 
     // FPS counter + debug
@@ -606,8 +568,8 @@
             transparent: true,
         });
         const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(4.0, 4.0, 1);
-        sprite.position.y = 1.5;
+        sprite.scale.set(2.0, 2.0, 1);
+        sprite.position.y = 0.8;
         g.add(sprite);
         return g;
     }
@@ -616,7 +578,7 @@
     function createGate(z, side, type, stat, value) {
         const gateX = side * (ROAD_W / 4);
         const w = ROAD_W / 2 - 0.5;
-        const h = 4;
+        const h = 2.5;
 
         const isGood = (type === 'add' && value > 0) || (type === 'multiply' && value > 1);
         const color = isGood ? 0x00E676 : 0xFF1744;
@@ -640,8 +602,8 @@
         const statNames = { squad: 'Squad', fireRate: 'Fire Rate', damage: 'Damage' };
         const opStr = type === 'add' ? (value >= 0 ? '+' : '') + value : 'x' + value;
         const labelText = opStr + ' ' + statNames[stat];
-        const label = createTextSprite(labelText, colorHex, 1.2);
-        label.position.set(gateX, h + 1.2, z);
+        const label = createTextSprite(labelText, colorHex, 0.8);
+        label.position.set(gateX, h + 0.8, z);
         scene.add(label);
 
         const gate = { mesh, label, type, stat, value, side, z, used: false, isGood };
@@ -651,29 +613,41 @@
 
     // ─── Wave Configuration ─────────────────────────────────────────
     function getWaveConfig(sec) {
+        const lvl = LEVELS[currentLevel] || LEVELS[LEVELS.length - 1];
+        const effectiveSec = (sec + lvl.diffOffset) * lvl.diffScale;
+        const s = effectiveSec; // shorthand
         return {
-            zombieCount: Math.min(10 + sec * 6, 70),
-            zombieHP: Math.max(2, Math.ceil(sec * 0.9)),
-            zombieBaseSpeed: 3.5 + sec * 0.45,
-            fastRatio: sec >= 2 ? Math.min(0.15 + (sec - 2) * 0.04, 0.4) : 0,
-            bruteRatio: sec >= 3 ? Math.min(0.08 + (sec - 3) * 0.03, 0.25) : 0,
-            trackerRatio: sec >= 4 ? Math.min(0.2 + (sec - 4) * 0.06, 0.55) : 0,
-            barrelHP: 6 + sec * 6,
-            barrelCount: Math.min(1 + Math.floor(sec / 2), 3),
+            zombieCount: Math.min(Math.round(8 + s * 5), 60),
+            zombieHP: Math.max(1, Math.ceil(s * 0.8)),
+            zombieBaseSpeed: 3.0 + s * 0.35,
+            fastRatio: s >= 2 ? Math.min(0.15 + (s - 2) * 0.04, 0.45) : 0,
+            bruteRatio: s >= 3 ? Math.min(0.08 + (s - 3) * 0.03, 0.3) : 0,
+            trackerRatio: s >= 4 ? Math.min(0.2 + (s - 4) * 0.06, 0.55) : 0,
+            barrelHP: 6 + Math.round(s * 5),
+            barrelCount: Math.min(1 + Math.floor(s / 2), 4),
         };
     }
 
     // ─── Segment Generation ─────────────────────────────────────────
     function generateSegment(segZ) {
-        const segType = SEGMENT_TYPES[segmentIndex % 3];
+        // Don't generate more content if level is complete or all sections generated
+        if (levelComplete) return;
+        const lvl = LEVELS[currentLevel];
+        if (currentLevel < LEVELS.length - 1 && sectionCount >= lvl.sections) return;
+
         segmentIndex++;
 
-        if (segType === 'gates') {
+        // Every segment gets zombies
+        generateZombieWave(segZ + ZOMBIE_OFFSET);
+
+        // Gates every 3rd segment
+        if (segmentIndex % 3 === 1) {
             sectionCount++;
             generateGatePair(segZ + GATE_OFFSET);
-        } else if (segType === 'zombies') {
-            generateZombieWave(segZ + ZOMBIE_OFFSET);
-        } else if (segType === 'barrels') {
+        }
+
+        // Barrels every 3rd segment (offset from gates)
+        if (segmentIndex % 3 === 2) {
             generateBarrelRow(segZ + BARREL_OFFSET);
         }
     }
@@ -681,19 +655,19 @@
     function generateGatePair(z) {
         const sec = sectionCount;
         const stats = ['squad', 'fireRate', 'damage'];
-        const s1 = stats[Math.floor(Math.random() * stats.length)];
-        const s2 = stats[Math.floor(Math.random() * stats.length)];
+        const s1 = stats[Math.floor(rng() * stats.length)];
+        const s2 = stats[Math.floor(rng() * stats.length)];
 
         function makeGoodValue(stat) {
             if (stat === 'squad') {
-                if (sec < 3) return { type: 'add', value: 2 + Math.floor(Math.random() * 2) };
-                if (sec < 6) return { type: 'add', value: 3 + Math.floor(Math.random() * 4) };
-                if (Math.random() < 0.25) return { type: 'multiply', value: 2 };
-                return { type: 'add', value: 4 + Math.floor(Math.random() * 6) };
+                if (sec < 3) return { type: 'add', value: 2 + Math.floor(rng() * 2) };
+                if (sec < 6) return { type: 'add', value: 3 + Math.floor(rng() * 4) };
+                if (rng() < 0.25) return { type: 'multiply', value: 2 };
+                return { type: 'add', value: 4 + Math.floor(rng() * 6) };
             } else if (stat === 'fireRate') {
-                return { type: 'add', value: 1 + (sec > 4 ? Math.floor(Math.random() * 2) : 0) };
+                return { type: 'add', value: 1 + (sec > 4 ? Math.floor(rng() * 2) : 0) };
             } else {
-                if (sec > 5 && Math.random() < 0.2) return { type: 'multiply', value: 2 };
+                if (sec > 5 && rng() < 0.2) return { type: 'multiply', value: 2 };
                 return { type: 'add', value: 1 + (sec > 3 ? 1 : 0) };
             }
         }
@@ -704,23 +678,24 @@
             } else if (stat === 'fireRate') {
                 return { type: 'add', value: -(1 + Math.floor(Math.min(sec * 0.4, 3))) };
             } else {
-                if (sec > 6 && Math.random() < 0.3) return { type: 'multiply', value: 0.5 };
+                if (sec > 6 && rng() < 0.3) return { type: 'multiply', value: 0.5 };
                 return { type: 'add', value: -Math.max(1, Math.floor(sec * 0.3)) };
             }
         }
 
         // Chance of bad gate increases with section
         const badChance = Math.min(0.75, 0.35 + sec * 0.06);
-        const leftIsGood = Math.random() < 0.5;
+        const leftIsGood = rng() < 0.5;
         const goodVal = makeGoodValue(s1);
-        const otherVal = Math.random() < badChance ? makeBadValue(s2) : makeGoodValue(s2);
+        const otherVal = rng() < badChance ? makeBadValue(s2) : makeGoodValue(s2);
 
+        const spawnZ = -(z - worldScroll);
         if (leftIsGood) {
-            createGate(-z, -1, goodVal.type, s1, goodVal.value);
-            createGate(-z, 1, otherVal.type, s2, otherVal.value);
+            createGate(spawnZ, -1, goodVal.type, s1, goodVal.value);
+            createGate(spawnZ, 1, otherVal.type, s2, otherVal.value);
         } else {
-            createGate(-z, -1, otherVal.type, s2, otherVal.value);
-            createGate(-z, 1, goodVal.type, s1, goodVal.value);
+            createGate(spawnZ, -1, otherVal.type, s2, otherVal.value);
+            createGate(spawnZ, 1, goodVal.type, s1, goodVal.value);
         }
     }
 
@@ -737,24 +712,24 @@
             if (idx < 0) break;
 
             // Determine type
-            const r = Math.random();
+            const r = rng();
             let type = 0; // normal
             if (r < cfg.bruteRatio) type = 2;
             else if (r < cfg.bruteRatio + cfg.fastRatio) type = 1;
 
             const hp = type === 2 ? Math.ceil(cfg.zombieHP * 2.5) : (type === 1 ? Math.max(1, cfg.zombieHP - 1) : cfg.zombieHP);
             const speed = type === 1 ? cfg.zombieBaseSpeed * 1.6 : (type === 2 ? cfg.zombieBaseSpeed * 0.65 : cfg.zombieBaseSpeed);
-            const isTracker = Math.random() < cfg.trackerRatio;
+            const isTracker = rng() < cfg.trackerRatio;
 
-            zX[idx] = (Math.random() - 0.5) * (ROAD_W - 2);
-            zZ[idx] = -z - (Math.random() - 0.5) * 8;
+            zX[idx] = (rng() - 0.5) * (ROAD_W - 2);
+            zZ[idx] = -(z - worldScroll) - rng() * 10;
             zHP[idx] = hp;
             zMaxHP[idx] = hp;
-            zSpeed[idx] = speed + (Math.random() - 0.5) * 1.0;
+            zSpeed[idx] = speed + (rng() - 0.5) * 1.0;
             zActive[idx] = 1;
             zType[idx] = type;
             zTracker[idx] = isTracker ? 1 : 0;
-            zWobble[idx] = Math.random() * Math.PI * 2;
+            zWobble[idx] = rng() * Math.PI * 2;
 
             if (idx >= zombieHighWater) zombieHighWater = idx + 1;
         }
@@ -767,10 +742,10 @@
 
         const positions = [];
         if (count === 1) {
-            positions.push(Math.random() < 0.5 ? (Math.random() - 0.5) * 1.5 : (Math.random() - 0.5) * (ROAD_W - 3));
+            positions.push(rng() < 0.5 ? (rng() - 0.5) * 1.5 : (rng() - 0.5) * (ROAD_W - 3));
         } else if (count === 2) {
-            positions.push(-ROAD_W / 4 + (Math.random() - 0.5) * 1.5);
-            positions.push(ROAD_W / 4 + (Math.random() - 0.5) * 1.5);
+            positions.push(-ROAD_W / 4 + (rng() - 0.5) * 1.5);
+            positions.push(ROAD_W / 4 + (rng() - 0.5) * 1.5);
         } else {
             positions.push(-ROAD_W / 3);
             positions.push(0);
@@ -779,7 +754,7 @@
 
         for (const bx of positions) {
             const barrel = createBarrelObj();
-            barrel.position.set(bx, 0, -z);
+            barrel.position.set(bx, 0, -(z - worldScroll));
             barrel.userData = { hp, maxHp: hp };
             scene.add(barrel);
             barrels.push(barrel);
@@ -891,8 +866,13 @@
     }
 
     function updateHUD() {
-        const dist = Math.floor(Math.abs(playerZ));
-        distDisplay.textContent = dist + 'm';
+        const dist = Math.floor(worldScroll);
+        const lvl = LEVELS[currentLevel];
+        if (currentLevel < LEVELS.length - 1) {
+            distDisplay.textContent = 'Lv.' + (currentLevel + 1) + ' §' + levelSectionsCompleted + '/' + lvl.sections;
+        } else {
+            distDisplay.textContent = dist + 'm (§' + sectionCount + ')';
+        }
         squadDisplay.textContent = squadCount;
         coinDisplay.textContent = coins;
         statsDisplay.textContent = 'DMG:' + damageStat + ' FR:' + fireRateStat.toFixed(1);
@@ -920,7 +900,7 @@
 
         // Regenerate jitter for new squad size
         for (let i = 0; i < MAX_SOLDIERS * 2; i++) {
-            soldierJitter[i] = (Math.random() - 0.5) * 2;
+            soldierJitter[i] = (rng() - 0.5) * 2;
         }
 
         const opStr = type === 'add' ? (val >= 0 ? '+' : '') + val : 'x' + val;
@@ -971,23 +951,25 @@
 
     // ─── Generation Control ─────────────────────────────────────────
     function generateAhead() {
-        while (nextSegmentZ < Math.abs(playerZ) + VIEW_AHEAD) {
+        while (nextSegmentZ < worldScroll + VIEW_AHEAD) {
             generateSegment(nextSegmentZ);
             nextSegmentZ += SEGMENT_LEN;
         }
     }
 
     // ─── Recycle Road ───────────────────────────────────────────────
-    function recycleRoad() {
+    function scrollAndRecycleRoad(dt) {
+        const scrollDelta = WORLD_SPEED * dt;
         const totalLen = NUM_ROAD_SEGS * ROAD_SEG_LEN;
         for (const seg of roadSegments) {
-            while (seg.position.z > playerZ + ROAD_SEG_LEN) seg.position.z -= totalLen;
+            seg.position.z += scrollDelta;
+            if (seg.position.z > ROAD_SEG_LEN) seg.position.z -= totalLen;
         }
         const btotalLen = NUM_BUILDING_GROUPS * ROAD_SEG_LEN;
         for (const bg of buildingGroups) {
-            while (bg.position.z > playerZ + ROAD_SEG_LEN) bg.position.z -= btotalLen;
+            bg.position.z += scrollDelta;
+            if (bg.position.z > ROAD_SEG_LEN) bg.position.z -= btotalLen;
         }
-        if (skyMesh) skyMesh.position.z = playerZ;
     }
 
     // ─── Find Nearest Target ────────────────────────────────────────
@@ -1026,8 +1008,8 @@
             const type = zType[i];
             const idx = counts[type]++;
             const mesh = zombieMeshes[type];
-            const scale = type === 2 ? 6.0 : 4.0;
-            const yOff = type === 2 ? 2.2 : 1.6;
+            const scale = type === 2 ? 1.2 : 0.8;
+            const yOff = type === 2 ? 0.5 : 0.35;
 
             _dummy.position.set(zX[i], yOff, zZ[i]);
             _dummy.quaternion.copy(camera.quaternion);
@@ -1061,9 +1043,9 @@
             const oz = row * spacing * 0.5 + soldierJitter[i * 2 + 1] * 0.1;
             const bob = Math.sin(time * 4 + i * 0.5) * 0.1;
 
-            _dummy.position.set(playerX + ox, 1.5 + bob, playerZ + oz);
+            _dummy.position.set(playerX + ox, 0.3 + bob, playerZ + oz);
             _dummy.quaternion.copy(camera.quaternion);
-            _dummy.scale.set(3.0, 3.0, 1);
+            _dummy.scale.set(1.0, 1.0, 1);
             _dummy.updateMatrix();
             soldierMesh.setMatrixAt(i, _dummy.matrix);
         }
@@ -1098,7 +1080,7 @@
         for (let i = 0; i < zombieHighWater; i++) {
             if (!zActive[i]) continue;
             if (zHP[i] >= zMaxHP[i] && zMaxHP[i] <= 2) continue; // skip trivial HP
-            const p = worldToScreen(zX[i], 3.5, zZ[i]);
+            const p = worldToScreen(zX[i], 1.0, zZ[i]);
             if (!p.visible) continue;
             const barW = zType[i] === 2 ? 40 : 28;
             const barH = 4;
@@ -1119,7 +1101,7 @@
 
         // Barrel HP bars
         for (const br of barrels) {
-            const p = worldToScreen(br.position.x, 3.5, br.position.z);
+            const p = worldToScreen(br.position.x, 1.2, br.position.z);
             if (!p.visible) continue;
             const barW = 36;
             const barH = 5;
@@ -1134,17 +1116,17 @@
             overlayCtx.fillText(br.userData.hp, p.sx, p.sy - 2);
         }
 
-        // Combo display
-        if (comboCount >= 3) {
-            const size = Math.min(36 + comboCount * 2, 56);
+        // Combo display — only show big combos briefly
+        if (comboCount >= 10) {
+            const size = Math.min(20 + Math.floor(comboCount / 5) * 2, 32);
             overlayCtx.font = `bold ${size}px system-ui`;
             overlayCtx.textAlign = 'center';
-            overlayCtx.strokeStyle = 'rgba(0,0,0,0.7)';
-            overlayCtx.lineWidth = 4;
-            const txt = `x${comboCount} COMBO!`;
-            const cy = overlayCanvas.height * 0.22;
+            overlayCtx.strokeStyle = 'rgba(0,0,0,0.5)';
+            overlayCtx.lineWidth = 3;
+            const txt = `x${comboCount}`;
+            const cy = overlayCanvas.height * 0.15;
             overlayCtx.strokeText(txt, overlayCanvas.width / 2, cy);
-            overlayCtx.fillStyle = comboCount >= 10 ? '#FF1744' : (comboCount >= 5 ? '#FFD600' : '#00E676');
+            overlayCtx.fillStyle = comboCount >= 20 ? '#FF1744' : '#FFD600';
             overlayCtx.fillText(txt, overlayCanvas.width / 2, cy);
         }
 
@@ -1161,16 +1143,30 @@
 
         const time = Date.now() * 0.001;
 
-        // Forward movement
-        playerZ -= FORWARD_SPEED * dt;
+        // Forward movement — player stays at Z=0, world scrolls via worldScroll
+        worldScroll += WORLD_SPEED * dt;
+
+        // Scroll world entities toward player
+        const scrollDelta = WORLD_SPEED * dt;
+        for (const gate of gates) {
+            gate.mesh.position.z += scrollDelta;
+            gate.label.position.z += scrollDelta;
+        }
+        for (const barrel of barrels) {
+            barrel.position.z += scrollDelta;
+        }
+        // Zombies also scroll with the world (on top of their own movement)
+        for (let i = 0; i < zombieHighWater; i++) {
+            if (zActive[i]) zZ[i] += scrollDelta;
+        }
 
         // Steering
         playerX += (targetX - playerX) * Math.min(1, 10 * dt);
         playerX = Math.max(-ROAD_W / 2 + 1, Math.min(ROAD_W / 2 - 1, playerX));
 
-        // Generate + recycle
+        // Generate + scroll road + cleanup
         generateAhead();
-        recycleRoad();
+        scrollAndRecycleRoad(dt);
         cleanupBehind();
 
         // Combo timer
@@ -1193,22 +1189,18 @@
         const squadVisual = Math.min(squadCount, MAX_SOLDIERS);
         const squadCols = Math.min(squadVisual, 8);
 
-        // Auto-fire
+        // Auto-fire — always fires forward
         fireCooldown -= dt;
         if (fireCooldown <= 0 && squadCount > 0) {
-            const target = findNearestTarget();
-            if (target) {
-                // Squad size = survivability, not DPS. Cap firers.
-                const firers = Math.min(squadVisual, 15);
-                for (let i = 0; i < firers; i++) {
-                    const col = i % squadCols;
-                    const spacing = 0.7;
-                    const ox = (col - (squadCols - 1) / 2) * spacing;
-                    getBullet(playerX + ox, 0.4, playerZ - 0.5, damageStat);
-                }
-                spawnMuzzleFlash(playerX, playerZ);
-                SFX.shoot();
+            const firers = Math.min(squadVisual, 15);
+            for (let i = 0; i < firers; i++) {
+                const col = i % squadCols;
+                const spacing = 0.7;
+                const ox = (col - (squadCols - 1) / 2) * spacing;
+                getBullet(playerX + ox, 0.3, playerZ - 0.5, damageStat);
             }
+            spawnMuzzleFlash(playerX, playerZ);
+            SFX.shoot();
             fireCooldown = 1 / fireRateStat;
         }
 
@@ -1228,7 +1220,7 @@
                 if (!zActive[j]) continue;
                 const dx = Math.abs(b.position.x - zX[j]);
                 const dz = Math.abs(b.position.z - zZ[j]);
-                const hr = zType[j] === 2 ? 1.8 : 1.2;
+                const hr = zType[j] === 2 ? 0.5 : 0.35;
                 if (dx < hr && dz < hr) {
                     const dmg = b.userData.damage;
                     zHP[j] -= dmg;
@@ -1303,9 +1295,9 @@
             zX[i] = Math.max(-ROAD_W / 2 + 0.5, Math.min(ROAD_W / 2 - 0.5, zX[i]));
 
             // Collision with player
-            if (Math.abs(zZ[i] - playerZ) < 1.5 && Math.abs(zX[i] - playerX) < 2.5) {
-                // Each zombie deals max(2, hp) damage to squad
-                const kills = Math.min(Math.max(2, zHP[i]), squadCount);
+            if (Math.abs(zZ[i] - playerZ) < 0.8 && Math.abs(zX[i] - playerX) < 1.2) {
+                // Each zombie kills 1 soldier on contact
+                const kills = Math.min(1, squadCount);
                 squadCount -= kills;
                 spawnExplosion(zX[i], zZ[i]);
                 spawnParticles(playerX, 1.0, playerZ, 0x2196F3, kills);
@@ -1324,7 +1316,7 @@
         for (let i = barrels.length - 1; i >= 0; i--) {
             const br = barrels[i];
             if (Math.abs(br.position.z - playerZ) < 1.5 && Math.abs(br.position.x - playerX) < 2.0) {
-                const kills = Math.min(br.userData.hp, squadCount);
+                const kills = Math.min(2, squadCount); // barrel collision kills 2 soldiers
                 squadCount -= kills;
                 spawnExplosion(br.position.x, br.position.z);
                 spawnParticles(br.position.x, 1.0, br.position.z, 0xFF6D00, 6);
@@ -1349,6 +1341,20 @@
                 const isLeftGate = gate.side === -1;
                 if ((onLeftSide && isLeftGate) || (!onLeftSide && !isLeftGate)) {
                     applyGateEffect(gate);
+                }
+                // Mark the paired gate as used too (counts as section passed)
+                if (!gate.userData) gate.userData = {};
+                if (!gate.userData.sectionCounted) {
+                    gate.userData.sectionCounted = true;
+                    levelSectionsCompleted++;
+                    // Also mark the paired gate
+                    for (const g2 of gates) {
+                        if (g2 !== gate && Math.abs(g2.mesh.position.z - gateZ) < 0.5) {
+                            g2.used = true;
+                            g2.mesh.material.opacity = 0.1;
+                            g2.label.material.opacity = 0.3;
+                        }
+                    }
                 }
             }
         }
@@ -1397,12 +1403,11 @@
             if (d.userData.life <= 0) { scene.remove(d); damageNums.splice(i, 1); }
         }
 
-        // Camera
-        const camTargetZ = playerZ + 12;
+        // Camera — fixed position, player at Z=0
         const shakeX = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount * 2 : 0;
         const shakeY = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
-        camera.position.set(shakeX, 14 + shakeY, camTargetZ);
-        camera.lookAt(playerX * 0.3, 0, playerZ - 10);
+        camera.position.set(shakeX, 16 + shakeY, 12);
+        camera.lookAt(playerX * 0.3, 0, -8);
         if (shakeAmount > 0.01) shakeAmount *= 0.88;
         else shakeAmount = 0;
 
@@ -1421,8 +1426,28 @@
             }
         }
 
-        // Progress bar
-        waveBarFill.style.width = ((Math.abs(playerZ) % SEGMENT_LEN) / SEGMENT_LEN * 100) + '%';
+        // Progress bar — show level completion %
+        const lvl = LEVELS[currentLevel];
+        if (currentLevel < LEVELS.length - 1) {
+            waveBarFill.style.width = (levelSectionsCompleted / lvl.sections * 100) + '%';
+        } else {
+            waveBarFill.style.width = ((worldScroll % SEGMENT_LEN) / SEGMENT_LEN * 100) + '%';
+        }
+
+        // Check level completion
+        if (!levelComplete && currentLevel < LEVELS.length - 1) {
+            const lvl = LEVELS[currentLevel];
+            if (levelSectionsCompleted >= lvl.sections) {
+                // Wait until all active zombies and barrels are cleared
+                let activeEnemies = 0;
+                for (let i = 0; i < zombieHighWater; i++) if (zActive[i]) activeEnemies++;
+                activeEnemies += barrels.length;
+                if (activeEnemies === 0) {
+                    doLevelComplete();
+                    return;
+                }
+            }
+        }
 
         updateHUD();
         renderOverlay();
@@ -1454,10 +1479,15 @@
     function startGame() {
         clearEntities();
         playerZ = 0; playerX = 0; targetX = 0;
+        worldScroll = 0;
         score = 0; coins = 0;
-        squadCount = 5;
-        fireRateStat = 2.5; damageStat = 1;
+        const lvl = LEVELS[currentLevel];
+        squadCount = lvl.startSquad;
+        fireRateStat = lvl.startFR; damageStat = lvl.startDMG;
+        WORLD_SPEED = lvl.speed;
         sectionCount = 0; segmentIndex = 0;
+        levelSectionsCompleted = 0; levelComplete = false;
+        seedRandom(currentLevel * 7919 + 42); // deterministic seed per level
         nextSegmentZ = SEGMENT_LEN * 0.4;
         fireCooldown = 0; shakeAmount = 0;
         comboCount = 0; comboTimer = 0; bestCombo = 0;
@@ -1470,11 +1500,15 @@
         waveBar.style.display = 'block';
 
         // Refresh soldier jitter
-        for (let i = 0; i < MAX_SOLDIERS * 2; i++) soldierJitter[i] = (Math.random() - 0.5) * 2;
+        for (let i = 0; i < MAX_SOLDIERS * 2; i++) soldierJitter[i] = (rng() - 0.5) * 2;
 
         generateAhead();
         updateHUD();
-        showActionText('GO!', '#00E676');
+        const lvlName = currentLevel < LEVELS.length - 1
+            ? 'Lv.' + (currentLevel + 1) + ': ' + lvl.name
+            : 'ENDLESS MODE';
+        showActionText(lvlName, '#feca57');
+        setTimeout(() => showActionText('GO!', '#00E676'), 1500);
     }
 
     function doGameOver() {
@@ -1484,12 +1518,47 @@
         waveBar.style.display = 'none';
         goTitle.textContent = 'OVERRUN';
         goTitle.className = 'lose';
-        const dist = Math.floor(Math.abs(playerZ));
-        goWave.textContent = dist + 'm (Section ' + sectionCount + ')';
+        const dist = Math.floor(worldScroll);
+        const lvl = LEVELS[currentLevel];
+        goWave.textContent = 'Lv.' + (currentLevel + 1) + ' "' + lvl.name + '" — ' + dist + 'm (§' + levelSectionsCompleted + '/' + lvl.sections + ')';
         goScore.textContent = score + (bestCombo >= 5 ? ' (x' + bestCombo + ' best combo!)' : '');
+        const retryBtn = document.getElementById('btn-retry');
+        retryBtn.textContent = 'TRY AGAIN';
+        retryBtn.className = 'btn retry';
+        retryBtn.onclick = () => startGame();
         gameoverScreen.classList.remove('hidden');
         gameoverScreen.classList.add('active');
-        // Clear overlay
+        if (overlayCtx) overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    }
+
+    function doLevelComplete() {
+        state = 'levelcomplete';
+        levelComplete = true;
+        hudEl.style.display = 'none';
+        waveBar.style.display = 'none';
+        if (currentLevel + 1 > unlockedLevel && currentLevel < LEVELS.length - 2) {
+            unlockedLevel = currentLevel + 1;
+            saveProgress();
+        }
+        const lvl = LEVELS[currentLevel];
+        SFX.upgrade();
+        setTimeout(() => SFX.combo(), 200);
+        goTitle.textContent = 'LEVEL CLEAR!';
+        goTitle.className = 'win';
+        goWave.textContent = '"' + lvl.name + '" — ' + Math.floor(worldScroll) + 'm';
+        goScore.textContent = score + (bestCombo >= 5 ? ' (x' + bestCombo + ' best combo!)' : '');
+        const retryBtn = document.getElementById('btn-retry');
+        if (currentLevel < LEVELS.length - 2) {
+            retryBtn.textContent = 'NEXT LEVEL';
+            retryBtn.className = 'btn next';
+            retryBtn.onclick = () => { currentLevel++; startGame(); };
+        } else {
+            retryBtn.textContent = 'PLAY AGAIN';
+            retryBtn.className = 'btn retry';
+            retryBtn.onclick = () => startGame();
+        }
+        gameoverScreen.classList.remove('hidden');
+        gameoverScreen.classList.add('active');
         if (overlayCtx) overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     }
 
@@ -1540,7 +1609,30 @@
         requestAnimationFrame(loop);
     }
 
+    // ─── Level Select UI ────────────────────────────────────────────
+    function renderLevelSelect() {
+        const container = document.getElementById('level-select');
+        if (!container) return;
+        container.innerHTML = '';
+        for (let i = 0; i < LEVELS.length; i++) {
+            const btn = document.createElement('div');
+            btn.className = 'level-btn';
+            if (i === currentLevel) btn.classList.add('selected');
+            if (i > unlockedLevel) btn.classList.add('locked');
+            if (i < unlockedLevel) btn.classList.add('cleared');
+            btn.innerHTML = '<span class="lvl-num">' + (i + 1) + '</span><span class="lvl-name">' + LEVELS[i].name + '</span>';
+            if (i <= unlockedLevel) {
+                btn.addEventListener('click', () => {
+                    currentLevel = i;
+                    renderLevelSelect();
+                });
+            }
+            container.appendChild(btn);
+        }
+    }
+
     // ─── Init ───────────────────────────────────────────────────────
+    loadProgress();
     document.getElementById('btn-start').addEventListener('click', startGame);
     document.getElementById('btn-retry').addEventListener('click', startGame);
 
@@ -1550,6 +1642,30 @@
     initEnvironment();
     initOverlay();
     initInstancedMeshes();
+    renderLevelSelect();
     requestAnimationFrame(loop);
+
+    // Expose debug + AI interface
+    window._gameDebug = () => ({
+        activeZombies: debugActiveZombies, fps: lastFPS, squad: squadCount,
+        section: sectionCount, level: currentLevel, levelSections: levelSectionsCompleted,
+        worldScroll, score, coins, state, levelComplete
+    });
+
+    // AI steering interface for automated testing
+    window._steer = (x) => { targetX = Math.max(-ROAD_W / 2 + 1, Math.min(ROAD_W / 2 - 1, x)); };
+    window._getState = () => ({
+        playerX, playerZ, targetX, squadCount,
+        zombies: (() => {
+            const z = [];
+            for (let i = 0; i < zombieHighWater; i++) {
+                if (zActive[i]) z.push({ x: zX[i], z: zZ[i], hp: zHP[i], type: zType[i], tracker: zTracker[i] });
+            }
+            return z;
+        })(),
+        gates: gates.filter(g => !g.used).map(g => ({ z: g.mesh.position.z, side: g.side, isGood: g.isGood, stat: g.stat })),
+        barrels: barrels.map(b => ({ x: b.position.x, z: b.position.z, hp: b.userData.hp })),
+    });
+    window._godMode = () => { squadCount = 999; };
 
 })();
