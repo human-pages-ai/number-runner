@@ -229,16 +229,27 @@ function draw() {
         ctx.fillStyle = '#ff5533';
         ctx.fillText(label, x, y - bh * 0.32);
 
-        // Cyan weapon/turret icon on top
-        const iconS = s * 0.18;
-        // Gun barrel shape
-        ctx.fillStyle = '#00e5ff';
-        ctx.fillRect(x - iconS * 0.15, y - bh - iconS * 0.9, iconS * 0.3, iconS * 0.5);
-        ctx.fillRect(x - iconS * 0.5, y - bh - iconS * 0.5, iconS, iconS * 0.4);
-        // Base
+        // Cyan weapon turret on top
+        const iconS = s * 0.22;
+        const ty = y - bh - iconS * 0.3;
+        // Tripod legs
+        ctx.strokeStyle = '#00a8b8';
+        ctx.lineWidth = Math.max(1, iconS * 0.06);
+        ctx.beginPath(); ctx.moveTo(x, ty + iconS * 0.15); ctx.lineTo(x - iconS * 0.4, ty + iconS * 0.35); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, ty + iconS * 0.15); ctx.lineTo(x + iconS * 0.4, ty + iconS * 0.35); ctx.stroke();
+        // Gun body
+        ctx.fillStyle = '#00d4e8';
+        rrect(x - iconS * 0.25, ty - iconS * 0.12, iconS * 0.5, iconS * 0.24, iconS * 0.05);
+        ctx.fill();
+        // Barrel
         ctx.fillStyle = '#00bcd4';
-        ctx.beginPath();
-        ctx.arc(x, y - bh - iconS * 0.15, iconS * 0.35, 0, Math.PI * 2);
+        ctx.fillRect(x - iconS * 0.06, ty - iconS * 0.5, iconS * 0.12, iconS * 0.4);
+        // Muzzle
+        ctx.fillStyle = '#00e5ff';
+        ctx.beginPath(); ctx.arc(x, ty - iconS * 0.5, iconS * 0.08, 0, Math.PI * 2); ctx.fill();
+        // Ammo box
+        ctx.fillStyle = '#008fa0';
+        rrect(x + iconS * 0.15, ty - iconS * 0.05, iconS * 0.18, iconS * 0.2, 2);
         ctx.fill();
 
         // Danger glow around barrel
@@ -410,33 +421,33 @@ function draw() {
     })();
 
     // ── Bullet streams ──
-    function drawBulletStream(xStart, xNormEnd, tStart, tEnd, count) {
+    function drawBulletStream(xNorm, tStart, tEnd, count) {
+        // Bullets go STRAIGHT — same xNorm the whole way
         for (let i = 0; i < count; i++) {
             const frac = i / count;
             const t = tStart + (tEnd - tStart) * frac;
-            const xn = xStart + (xNormEnd - xStart) * frac;
-            const x = roadX(xn, t);
+            const x = roadX(xNorm, t);
             const y = roadY(t);
-            const sz = roadS(t) * 4;
+            const sz = roadS(t) * 3.5;
 
             // Bright golden core
             ctx.fillStyle = `rgba(255,210,30,${0.6 + Math.random() * 0.4})`;
             ctx.beginPath();
-            ctx.arc(x, y, Math.max(1, sz), 0, Math.PI * 2);
+            ctx.arc(x, y, Math.max(1.2, sz), 0, Math.PI * 2);
             ctx.fill();
 
             // Glow
-            ctx.fillStyle = `rgba(255,150,0,${0.2 + Math.random() * 0.15})`;
+            ctx.fillStyle = `rgba(255,150,0,${0.15 + Math.random() * 0.1})`;
             ctx.beginPath();
-            ctx.arc(x, y, sz * 2, 0, Math.PI * 2);
+            ctx.arc(x, y, sz * 2.5, 0, Math.PI * 2);
             ctx.fill();
         }
     }
 
-    // Multiple streams from each soldier position — fewer, more spaced dots
+    // Straight parallel bullet streams from each soldier
     const solPositions = [-0.26, -0.13, 0, 0.13, 0.26];
     for (const sp of solPositions) {
-        drawBulletStream(sp, sp * 0.15, 0.82, 0.50, 10);
+        drawBulletStream(sp, 0.82, 0.48, 10);
     }
 
     // ── Fire sparks scattered on road ──
