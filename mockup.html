@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visual Mockup</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; }
+canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    const aspect = 9/16;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w/h > aspect) w = h * aspect; else h = w / aspect;
+    canvas.width = Math.floor(w);
+    canvas.height = Math.floor(h);
+}
+resize();
+window.addEventListener('resize', () => { resize(); draw(); });
+
+// ── Helpers ──
+function rrect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+    ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r);
+    ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h);
+    ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+
+function radGlow(x, y, r, c1, c2, c3) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, c1); g.addColorStop(0.5, c2); g.addColorStop(1, c3);
+    return g;
+}
+
+// ── Perspective helpers ──
+let W, H, cx, vpY;
+const roadBottomFrac = 0.65;
+const roadTopFrac = 0.38;
+
+function roadX(xNorm, t) {
+    const rw = (roadTopFrac + (roadBottomFrac - roadTopFrac) * t) * W;
+    return cx + xNorm * rw / 2;
+}
+function roadY(t) { return vpY + (H - vpY) * t; }
+function roadS(t) { return t; }
+
+function draw() {
+    W = canvas.width; H = canvas.height; cx = W/2;
+    vpY = H * 0.02;
+    const rbW = W * roadBottomFrac;
+    const rtW = W * roadTopFrac;
+
+    // ── Background ──
+    ctx.fillStyle = '#62625a';
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Road surface ──
+    const roadGrad = ctx.createLinearGradient(0, vpY, 0, H);
+    roadGrad.addColorStop(0, '#9a9888');
+    roadGrad.addColorStop(0.5, '#aca99a');
+    roadGrad.addColorStop(1, '#b8b5a5');
+    ctx.fillStyle = roadGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx - rbW/2, H);
+    ctx.lineTo(cx + rbW/2, H);
+    ctx.lineTo(cx + rtW/2, vpY);
+    ctx.lineTo(cx - rtW/2, vpY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Road surface texture — subtle noise lines
+    ctx.globalAlpha = 0.04;
+    for (let i = 0; i < 40; i++) {
+        const t = 0.1 + i * 0.022;
+        const y = roadY(t);
+        const lw = (roadTopFrac + (roadBottomFrac - roadTopFrac) * t) * W;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - lw/2 + 5, y);
+        ctx.lineTo(cx + lw/2 - 5, y);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Walls ──
+    function drawWall(side) {
+        const s = side; // -1 left, 1 right
+        const wallThick = 0.14; // fraction of W
+
+        for (let i = 0; i < 30; i++) {
+            const t1 = i * 0.033 + 0.02;
+            const t2 = t1 + 0.034;
+            if (t1 > 0.98) break;
+
+            const rw1 = (roadTopFrac + (roadBottomFrac - roadTopFrac) * t1) * W;
+            const rw2 = (roadTopFrac + (roadBottomFrac - roadTopFrac) * t2) * W;
+            const ww1 = W * wallThick * t1 * 2.5;
+            const ww2 = W * wallThick * t2 * 2.5;
+            const wallH1 = H * 0.05 * t1;
+            const wallH2 = H * 0.05 * t2;
+
+            const ex1 = cx + s * rw1/2;
+            const ex2 = cx + s * rw2/2;
+            const ox1 = ex1 + s * ww1;
+            const ox2 = ex2 + s * ww2;
+            const y1 = roadY(t1);
+            const y2 = roadY(t2);
+
+            // Wall face
+            const shade = 0.28 + t1 * 0.12;
+            ctx.fillStyle = `rgb(${Math.round(shade*255)},${Math.round(shade*245)},${Math.round(shade*230)})`;
+            ctx.beginPath();
+            ctx.moveTo(ex1, y1 - wallH1);
+            ctx.lineTo(ex2, y2 - wallH2);
+            ctx.lineTo(ox2, y2 - wallH2);
+            ctx.lineTo(ox1, y1 - wallH1);
+            ctx.closePath();
+            ctx.fill();
+
+            // Wall front
+            ctx.fillStyle = `rgb(${Math.round(shade*220)},${Math.round(shade*210)},${Math.round(shade*195)})`;
+            ctx.beginPath();
+            ctx.moveTo(ex1, y1);
+            ctx.lineTo(ex2, y2);
+            ctx.lineTo(ex2, y2 - wallH2);
+            ctx.lineTo(ex1, y1 - wallH1);
+            ctx.closePath();
+            ctx.fill();
+
+            // Horizontal panel lines on wall face
+            ctx.strokeStyle = `rgba(0,0,0,${0.06 + t1 * 0.06})`;
+            ctx.lineWidth = Math.max(0.5, t1 * 1.2);
+            for (let p = 0.25; p <= 0.75; p += 0.25) {
+                const py1 = y1 - wallH1 * p;
+                const py2 = y2 - wallH2 * p;
+                ctx.beginPath();
+                ctx.moveTo(ex1, py1);
+                ctx.lineTo(ex2, py2);
+                ctx.stroke();
+            }
+
+            // Top rail
+            ctx.strokeStyle = `rgba(180,175,160,${0.3 + t1 * 0.3})`;
+            ctx.lineWidth = Math.max(1, t1 * 3);
+            ctx.beginPath();
+            ctx.moveTo(ex1, y1 - wallH1);
+            ctx.lineTo(ex2, y2 - wallH2);
+            ctx.stroke();
+        }
+    }
+    drawWall(-1);
+    drawWall(1);
+
+    // ── Center dashes ──
+    for (let i = 0; i < 20; i++) {
+        const t = 0.15 + i * 0.04;
+        if (t > 0.95) break;
+        const y1 = roadY(t);
+        const y2 = roadY(t + 0.015);
+        ctx.strokeStyle = `rgba(190,185,170,${0.15 + t * 0.25})`;
+        ctx.lineWidth = Math.max(0.5, t * 2.5);
+        ctx.beginPath();
+        ctx.moveTo(cx, y1);
+        ctx.lineTo(cx, y2);
+        ctx.stroke();
+    }
+
+    // ── Barrel/Crate drawing ──
+    function drawBarrel(xNorm, t, hp, label) {
+        const x = roadX(xNorm, t);
+        const y = roadY(t);
+        const s = roadS(t) * W * 0.38;
+        const bw = s * 0.8;
+        const bh = s * 0.75;
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.beginPath();
+        ctx.ellipse(x, y + 2, bw * 0.5, bh * 0.15, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Barrel body — dark wood/metal
+        const barrelGrad = ctx.createLinearGradient(x - bw/2, y - bh, x + bw/2, y);
+        barrelGrad.addColorStop(0, '#4a4038');
+        barrelGrad.addColorStop(0.3, '#5a4e42');
+        barrelGrad.addColorStop(0.5, '#4a4038');
+        barrelGrad.addColorStop(0.7, '#5a4e42');
+        barrelGrad.addColorStop(1, '#3a3228');
+        ctx.fillStyle = barrelGrad;
+        rrect(x - bw/2, y - bh, bw, bh, s * 0.06);
+        ctx.fill();
+
+        // Metal bands
+        ctx.strokeStyle = '#6a6258';
+        ctx.lineWidth = Math.max(1, s * 0.03);
+        const bandPositions = [0.2, 0.5, 0.8];
+        for (const bp of bandPositions) {
+            const by = y - bh + bh * bp;
+            ctx.beginPath();
+            ctx.moveTo(x - bw/2 + 2, by);
+            ctx.lineTo(x + bw/2 - 2, by);
+            ctx.stroke();
+        }
+
+        // Barrel border
+        ctx.strokeStyle = '#2a2420';
+        ctx.lineWidth = Math.max(1, s * 0.02);
+        rrect(x - bw/2, y - bh, bw, bh, s * 0.06);
+        ctx.stroke();
+
+        // HP label — big and bold like reference
+        const fontSize = Math.round(s * 0.3);
+        ctx.font = `bold ${fontSize}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.lineWidth = 4;
+        ctx.strokeText(label, x, y - bh * 0.32);
+        ctx.fillStyle = '#ff5533';
+        ctx.fillText(label, x, y - bh * 0.32);
+
+        // Cyan weapon/turret icon on top
+        const iconS = s * 0.18;
+        // Gun barrel shape
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(x - iconS * 0.15, y - bh - iconS * 0.9, iconS * 0.3, iconS * 0.5);
+        ctx.fillRect(x - iconS * 0.5, y - bh - iconS * 0.5, iconS, iconS * 0.4);
+        // Base
+        ctx.fillStyle = '#00bcd4';
+        ctx.beginPath();
+        ctx.arc(x, y - bh - iconS * 0.15, iconS * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Danger glow around barrel
+        ctx.fillStyle = radGlow(x, y - bh/2, bw * 0.8,
+            'rgba(255,80,30,0.08)', 'rgba(255,40,0,0.03)', 'rgba(0,0,0,0)');
+        ctx.beginPath();
+        ctx.arc(x, y - bh/2, bw * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    drawBarrel(-0.32, 0.32, 100, '100');
+    drawBarrel(0.32, 0.32, 120, '120');
+
+    // ── Fire/explosion ──
+    function drawFire(x, y, radius, intensity) {
+        // Multiple layers for rich fire look
+        for (let layer = 0; layer < 5; layer++) {
+            const lr = radius * (1 - layer * 0.15);
+            const ox = (Math.random() - 0.5) * radius * 0.2;
+            const oy = (Math.random() - 0.5) * radius * 0.2;
+            const alpha = intensity * (1 - layer * 0.15);
+
+            const colors = [
+                [`rgba(255,220,120,${alpha})`, `rgba(240,120,10,${alpha*0.7})`, `rgba(180,40,0,0)`],
+                [`rgba(255,160,50,${alpha*0.8})`, `rgba(220,60,0,${alpha*0.5})`, `rgba(100,10,0,0)`],
+            ];
+            const c = colors[layer % 2];
+            ctx.fillStyle = radGlow(x+ox, y+oy, lr, c[0], c[1], c[2]);
+            ctx.beginPath();
+            ctx.arc(x+ox, y+oy - lr * 0.3, lr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // Big chunky explosion behind boss — multiple overlapping blobs
+    drawFire(roadX(0, 0.21), roadY(0.21) - W * 0.04, W * 0.10, 0.9);
+    drawFire(roadX(-0.06, 0.19), roadY(0.19) - W * 0.08, W * 0.09, 0.85);
+    drawFire(roadX(0.08, 0.18), roadY(0.18) - W * 0.10, W * 0.08, 0.8);
+    drawFire(roadX(0, 0.17), roadY(0.17) - W * 0.12, W * 0.11, 0.95);
+    drawFire(roadX(-0.04, 0.16), roadY(0.16) - W * 0.15, W * 0.07, 0.7);
+    drawFire(roadX(0.05, 0.15), roadY(0.15) - W * 0.13, W * 0.06, 0.6);
+    // Smoke column above
+    drawFire(roadX(0, 0.14), roadY(0.14) - W * 0.12, W * 0.05, 0.3);
+    drawFire(roadX(0.02, 0.13), roadY(0.13) - W * 0.10, W * 0.04, 0.2);
+
+    // ── Boss zombie (big) ──
+    function drawZombie(xNorm, t, size, isBoss) {
+        const x = roadX(xNorm, t);
+        const y = roadY(t);
+        const s = roadS(t) * size;
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.ellipse(x, y + 1, s * 0.4, s * 0.12, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Legs
+        ctx.fillStyle = '#4a3a22';
+        ctx.fillRect(x - s * 0.18, y - s * 0.35, s * 0.12, s * 0.35);
+        ctx.fillRect(x + s * 0.06, y - s * 0.35, s * 0.12, s * 0.35);
+
+        // Torso
+        const bodyGrad = ctx.createLinearGradient(x, y - s, x, y - s * 0.3);
+        bodyGrad.addColorStop(0, isBoss ? '#7a4a20' : '#5a4228');
+        bodyGrad.addColorStop(0.5, isBoss ? '#8a5a28' : '#6a5030');
+        bodyGrad.addColorStop(1, isBoss ? '#6a3a18' : '#4a3820');
+        ctx.fillStyle = bodyGrad;
+        rrect(x - s * 0.28, y - s * 0.9, s * 0.56, s * 0.6, s * 0.08);
+        ctx.fill();
+
+        // Torn details on torso
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i++) {
+            const ly = y - s * 0.8 + i * s * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(x - s * 0.15, ly);
+            ctx.lineTo(x + s * 0.15, ly);
+            ctx.stroke();
+        }
+
+        // Arms reaching forward
+        ctx.fillStyle = isBoss ? '#7a4a20' : '#5a4228';
+        ctx.save();
+        ctx.translate(x - s * 0.3, y - s * 0.7);
+        ctx.rotate(-0.7);
+        rrect(-s * 0.06, -s * 0.35, s * 0.12, s * 0.4, s * 0.04);
+        ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(x + s * 0.3, y - s * 0.7);
+        ctx.rotate(0.7);
+        rrect(-s * 0.06, -s * 0.35, s * 0.12, s * 0.4, s * 0.04);
+        ctx.fill();
+        ctx.restore();
+
+        // Clawed hands
+        ctx.fillStyle = '#3a2a15';
+        for (const sx of [-1, 1]) {
+            const hx = x + sx * s * 0.48;
+            const hy = y - s * 1.0;
+            for (let f = -1; f <= 1; f++) {
+                ctx.beginPath();
+                ctx.moveTo(hx + f * s * 0.04, hy);
+                ctx.lineTo(hx + f * s * 0.06, hy - s * 0.08);
+                ctx.lineTo(hx + f * s * 0.02, hy);
+                ctx.fill();
+            }
+        }
+
+        // Head
+        const headGrad = ctx.createRadialGradient(x, y - s * 1.0, 0, x, y - s * 1.0, s * 0.2);
+        headGrad.addColorStop(0, isBoss ? '#8a5a28' : '#6a5030');
+        headGrad.addColorStop(1, isBoss ? '#5a3a18' : '#4a3820');
+        ctx.fillStyle = headGrad;
+        ctx.beginPath();
+        ctx.arc(x, y - s * 1.0, s * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Mouth
+        ctx.fillStyle = '#1a0a00';
+        ctx.beginPath();
+        ctx.ellipse(x, y - s * 0.92, s * 0.08, s * 0.05, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes — glowing red/orange
+        ctx.shadowColor = '#ff4400';
+        ctx.shadowBlur = s * 0.15;
+        ctx.fillStyle = '#ff4400';
+        ctx.beginPath();
+        ctx.arc(x - s * 0.08, y - s * 1.04, s * 0.035, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x + s * 0.08, y - s * 1.04, s * 0.035, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Fire on boss
+        if (isBoss) {
+            drawFire(x, y - s * 0.6, s * 0.4, 0.5);
+            drawFire(x - s * 0.2, y - s * 0.8, s * 0.2, 0.4);
+            drawFire(x + s * 0.15, y - s * 0.5, s * 0.25, 0.35);
+        }
+    }
+
+    // Boss — big, on fire
+    drawZombie(0.02, 0.32, W * 0.25, true);
+    // Medium zombies
+    drawZombie(-0.25, 0.46, W * 0.12, false);
+    drawZombie(0.30, 0.43, W * 0.11, false);
+    // Closer zombies
+    drawZombie(0.05, 0.55, W * 0.10, false);
+    drawZombie(-0.38, 0.52, W * 0.09, false);
+    drawZombie(0.35, 0.57, W * 0.085, false);
+
+    // ── Damage number ──
+    (function() {
+        const x = roadX(0.02, 0.49);
+        const y = roadY(0.49) - W * 0.07;
+        const sz = Math.round(W * 0.075);
+        ctx.font = `bold ${sz}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = 4;
+        ctx.strokeText('128', x, y);
+        ctx.fillStyle = '#fff';
+        ctx.fillText('128', x, y);
+    })();
+
+    // ── Bullet streams ──
+    function drawBulletStream(xStart, xNormEnd, tStart, tEnd, count) {
+        for (let i = 0; i < count; i++) {
+            const frac = i / count;
+            const t = tStart + (tEnd - tStart) * frac;
+            const xn = xStart + (xNormEnd - xStart) * frac;
+            const x = roadX(xn, t);
+            const y = roadY(t);
+            const sz = roadS(t) * 4;
+
+            // Bright golden core
+            ctx.fillStyle = `rgba(255,210,30,${0.6 + Math.random() * 0.4})`;
+            ctx.beginPath();
+            ctx.arc(x, y, Math.max(1, sz), 0, Math.PI * 2);
+            ctx.fill();
+
+            // Glow
+            ctx.fillStyle = `rgba(255,150,0,${0.2 + Math.random() * 0.15})`;
+            ctx.beginPath();
+            ctx.arc(x, y, sz * 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // Multiple streams from each soldier position — fewer, more spaced dots
+    const solPositions = [-0.26, -0.13, 0, 0.13, 0.26];
+    for (const sp of solPositions) {
+        drawBulletStream(sp, sp * 0.15, 0.82, 0.50, 10);
+    }
+
+    // ── Fire sparks scattered on road ──
+    for (let i = 0; i < 20; i++) {
+        const t = 0.38 + Math.random() * 0.22;
+        const xn = (Math.random() - 0.5) * 0.6;
+        const x = roadX(xn, t);
+        const y = roadY(t);
+        const s = roadS(t) * W * 0.012;
+
+        ctx.fillStyle = radGlow(x, y, s,
+            'rgba(255,200,50,0.7)', 'rgba(255,100,0,0.3)', 'rgba(255,50,0,0)');
+        ctx.beginPath();
+        ctx.arc(x, y, s, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── Soldiers ──
+    function drawSoldier(xNorm, t) {
+        const x = roadX(xNorm, t);
+        const y = roadY(t);
+        const s = roadS(t) * W * 0.15;
+
+        // Cyan glow circle
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = Math.max(1.5, s * 0.04);
+        ctx.beginPath();
+        ctx.ellipse(x, y + s * 0.03, s * 0.5, s * 0.17, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner fill glow
+        ctx.fillStyle = 'rgba(0,229,255,0.08)';
+        ctx.beginPath();
+        ctx.ellipse(x, y + s * 0.03, s * 0.48, s * 0.16, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        ctx.beginPath();
+        ctx.ellipse(x, y, s * 0.3, s * 0.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Boots
+        ctx.fillStyle = '#2a2a22';
+        rrect(x - s * 0.22, y - s * 0.15, s * 0.16, s * 0.18, 2);
+        ctx.fill();
+        rrect(x + s * 0.06, y - s * 0.15, s * 0.16, s * 0.18, 2);
+        ctx.fill();
+
+        // Legs (camo pants)
+        ctx.fillStyle = '#4a5a32';
+        ctx.fillRect(x - s * 0.18, y - s * 0.4, s * 0.13, s * 0.28);
+        ctx.fillRect(x + s * 0.05, y - s * 0.4, s * 0.13, s * 0.28);
+
+        // Torso (tactical vest, orange/brown like reference)
+        const vestGrad = ctx.createLinearGradient(x, y - s * 0.95, x, y - s * 0.35);
+        vestGrad.addColorStop(0, '#b87830');
+        vestGrad.addColorStop(0.4, '#a06828');
+        vestGrad.addColorStop(1, '#886020');
+        ctx.fillStyle = vestGrad;
+        rrect(x - s * 0.28, y - s * 0.9, s * 0.56, s * 0.55, s * 0.06);
+        ctx.fill();
+
+        // Vest pockets/details
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        rrect(x - s * 0.2, y - s * 0.7, s * 0.15, s * 0.12, 1);
+        ctx.fill();
+        rrect(x + s * 0.05, y - s * 0.7, s * 0.15, s * 0.12, 1);
+        ctx.fill();
+
+        // Belt
+        ctx.fillStyle = '#3a3228';
+        ctx.fillRect(x - s * 0.28, y - s * 0.4, s * 0.56, s * 0.05);
+
+        // Arms
+        ctx.fillStyle = '#a06828';
+        ctx.save();
+        ctx.translate(x - s * 0.3, y - s * 0.7);
+        ctx.rotate(-0.15);
+        rrect(-s * 0.07, 0, s * 0.14, s * 0.3, s * 0.04);
+        ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(x + s * 0.3, y - s * 0.65);
+        ctx.rotate(0.15);
+        rrect(-s * 0.07, 0, s * 0.14, s * 0.28, s * 0.04);
+        ctx.fill();
+        ctx.restore();
+
+        // Hands (skin tone)
+        ctx.fillStyle = '#d4a870';
+        ctx.beginPath(); ctx.arc(x - s * 0.34, y - s * 0.42, s * 0.05, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x + s * 0.34, y - s * 0.40, s * 0.05, 0, Math.PI * 2); ctx.fill();
+
+        // Head
+        ctx.fillStyle = '#d4a870';
+        ctx.beginPath();
+        ctx.arc(x, y - s * 1.05, s * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Helmet
+        const helmGrad = ctx.createLinearGradient(x, y - s * 1.25, x, y - s * 0.95);
+        helmGrad.addColorStop(0, '#4a6a30');
+        helmGrad.addColorStop(1, '#3a5a25');
+        ctx.fillStyle = helmGrad;
+        ctx.beginPath();
+        ctx.arc(x, y - s * 1.08, s * 0.19, Math.PI, 0);
+        ctx.lineTo(x + s * 0.22, y - s * 1.0);
+        ctx.lineTo(x - s * 0.22, y - s * 1.0);
+        ctx.closePath();
+        ctx.fill();
+        // Helmet brim
+        ctx.fillStyle = '#3a5225';
+        ctx.beginPath();
+        ctx.ellipse(x, y - s * 1.0, s * 0.23, s * 0.05, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Gun — pointing forward/right
+        ctx.fillStyle = '#2a2a2a';
+        ctx.save();
+        ctx.translate(x + s * 0.15, y - s * 0.55);
+        ctx.rotate(-0.05);
+        // Stock
+        ctx.fillStyle = '#3a3a32';
+        rrect(-s * 0.04, s * 0.1, s * 0.08, s * 0.12, 1);
+        ctx.fill();
+        // Barrel
+        ctx.fillStyle = '#3a3a3a';
+        rrect(-s * 0.03, -s * 0.35, s * 0.06, s * 0.45, 1);
+        ctx.fill();
+        // Magazine
+        ctx.fillStyle = '#2a2a22';
+        rrect(s * 0.03, -s * 0.08, s * 0.06, s * 0.15, 1);
+        ctx.fill();
+        ctx.restore();
+
+        // Muzzle flash
+        const mfx = x + s * 0.18;
+        const mfy = y - s * 0.9;
+        const mfs = s * 0.18;
+        ctx.fillStyle = radGlow(mfx, mfy, mfs,
+            'rgba(255,240,150,0.9)', 'rgba(255,150,30,0.5)', 'rgba(255,60,0,0)');
+        ctx.beginPath();
+        ctx.arc(mfx, mfy, mfs, 0, Math.PI * 2);
+        ctx.fill();
+        // Bright core
+        ctx.fillStyle = 'rgba(255,255,220,0.8)';
+        ctx.beginPath();
+        ctx.arc(mfx, mfy, mfs * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 5 soldiers in formation — tighter, lower
+    const st = 0.84;
+    drawSoldier(-0.26, st + 0.015);
+    drawSoldier(-0.13, st + 0.005);
+    drawSoldier(0, st);
+    drawSoldier(0.13, st + 0.005);
+    drawSoldier(0.26, st + 0.015);
+
+    // ── Weapon icon (bottom-right) ──
+    (function() {
+        const r = W * 0.08;
+        const ix = W * 0.86;
+        const iy = H * 0.93;
+
+        // Dark circle
+        ctx.fillStyle = 'rgba(20,20,15,0.7)';
+        ctx.beginPath();
+        ctx.arc(ix, iy, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Cyan border
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ix, iy, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Simplified gun
+        ctx.fillStyle = '#888';
+        rrect(ix - r * 0.55, iy - r * 0.12, r * 0.9, r * 0.24, 3);
+        ctx.fill();
+        ctx.fillStyle = '#666';
+        rrect(ix - r * 0.1, iy + r * 0.1, r * 0.22, r * 0.35, 2);
+        ctx.fill();
+        // Scope
+        ctx.fillStyle = '#aaa';
+        rrect(ix + r * 0.1, iy - r * 0.28, r * 0.15, r * 0.15, 2);
+        ctx.fill();
+
+        // Ammo
+        ctx.font = `bold ${Math.round(r * 0.45)}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        ctx.fillText('5', ix + r * 0.7, iy + r * 0.7);
+    })();
+
+    // ── HUD top ──
+    const hudFS = Math.round(W * 0.034);
+    ctx.font = `bold ${hudFS}px system-ui`;
+    ctx.textAlign = 'center';
+
+    // Resource pills
+    function hudPill(x, y, w, h, label, color) {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        rrect(x, y, w, h, h/2);
+        ctx.fill();
+        ctx.fillStyle = color;
+        ctx.fillText(label, x + w/2, y + h * 0.7);
+    }
+    hudPill(W * 0.52, H * 0.015, W * 0.18, H * 0.04, '160', '#ffdd44');
+    hudPill(W * 0.72, H * 0.015, W * 0.18, H * 0.04, '112', '#88cc44');
+
+    // Level badge
+    ctx.fillStyle = '#ee3333';
+    ctx.beginPath();
+    ctx.arc(W * 0.95, H * 0.035, W * 0.04, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#cc2222';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.round(W * 0.038)}px system-ui`;
+    ctx.fillText('12', W * 0.95, H * 0.046);
+}
+
+draw();
+</script>
+</body>
+</html>
